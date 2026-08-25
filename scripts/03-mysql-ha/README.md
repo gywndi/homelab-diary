@@ -1,6 +1,7 @@
 # MySQL active/standby (Stage 1)
 
 chan08(source) ↔ chan09(replica), semi-sync 복제, keepalived VIP `10.5.5.210`로 페일오버.
+
 MySQL 8.0.46, datadir `/data/mysql`, `innodb_buffer_pool_size=2G`. k8s 밖에 호스트 네이티브로 설치 — 클러스터가 흔들려도 데이터는 별도로 보호하기 위함.
 
 ## 설계 결정
