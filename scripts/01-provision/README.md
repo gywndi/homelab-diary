@@ -22,44 +22,54 @@
 전부 `sudo`로 실행해야 합니다. 각 서버 `~/provision/`에도 동일한 스크립트가 복사되어 있습니다.
 
 ### 0. `bootstrap-sudoers.sh` — NOPASSWD sudo 권한 부여 (사람이 콘솔에 직접 로그인해서 최초 1회 실행)
-이 시점까진 sudo가 비밀번호를 요구해서 SSH로 원격 자동 실행이 불가능하다. 이후 모든 스크립트는 이 권한을 전제로 원격에서 돈다.
+이 시점까진 sudo가 비밀번호를 요구해서 SSH로 원격 자동 실행이 불가능하다. 이후 모든 명령은 이 권한을 전제로 원격에서 돈다.
 ```bash
-./bootstrap-sudoers.sh
+echo "chan ALL=(ALL) NOPASSWD:ALL" | sudo visudo -f /etc/sudoers.d/90-chan-nopasswd
+sudo chmod 0440 /etc/sudoers.d/90-chan-nopasswd
+sudo visudo -c
 ```
 
 ### 1. `02-system-update.sh` — 패키지 전체 업데이트 + 기본 유틸 설치
-`apt update/upgrade/dist-upgrade`, curl·vim·git·htop·chrony·xfsprogs·ufw 등 설치, 불필요 패키지 정리.
 ```bash
-sudo ./02-system-update.sh
+sudo apt-get update -y && sudo apt-get upgrade -y && sudo apt-get dist-upgrade -y
+sudo apt-get install -y curl wget vim git htop net-tools ca-certificates gnupg lsb-release chrony xfsprogs ufw
+sudo apt-get autoremove -y && sudo apt-get autoclean -y
 ```
 
 ### 2. `03-timezone.sh` — 타임존을 Asia/Seoul로 통일
 ```bash
-sudo ./03-timezone.sh
+sudo timedatectl set-timezone Asia/Seoul
+sudo systemctl enable --now chrony
 ```
 
-### 3. `04-firewall.sh` — UFW 기본 정책 적용 (아래 "방화벽 정책" 참고)
+### 3. `04-firewall.sh` — UFW 기본 정책 적용
 ```bash
-sudo ./04-firewall.sh
+sudo ufw default deny incoming
+sudo ufw default allow outgoing
+sudo ufw allow from 10.5.5.0/24 to any port 22 proto tcp
+sudo ufw allow from 10.5.5.0/24 to any port 6443 proto tcp
+# ... 나머지 포트는 아래 "방화벽 정책" 표 전체 참고
+sudo ufw --force enable
 ```
 
-### 4. `01-format-mount-data.sh` — 데이터 디스크 포맷 + `/data` 마운트
-지정한 디바이스를 XFS로 포맷하고 UUID로 `/etc/fstab`에 등록한다. 양쪽 서버 모두 `/dev/sda1`.
+### 4. `01-format-mount-data.sh` — 데이터 디스크 포맷 + `/data` 마운트 (양쪽 서버 모두 `/dev/sda1`)
 ```bash
-sudo ./01-format-mount-data.sh /dev/sda1
+sudo mkfs.xfs -f /dev/sda1
+sudo blkid -s UUID -o value /dev/sda1
+# 출력된 UUID를 /etc/fstab에 한 줄 추가 (예: UUID=2e346eca-8a4d-4d59-8897-4b5d84aefdc3  /data  xfs  defaults  0  2)
+sudo mount -a
 ```
 
 ### 5. `05-firewall-stage1.sh` — 방화벽 Stage 1 재정리
-MySQL(3306)/keepalived(vrrp) 포트 추가, 미사용 Calico 포트(179/tcp, 4789/udp) 제거.
 ```bash
-sudo ./05-firewall-stage1.sh
+sudo ufw allow from 10.5.5.0/24 to any port 3306 proto tcp
+sudo ufw allow from 10.5.5.0/24 proto vrrp
+sudo ufw delete allow from 10.5.5.0/24 to any port 179 proto tcp
+sudo ufw delete allow from 10.5.5.0/24 to any port 4789 proto udp
 ```
 
 ### (일괄 실행) `00-run-all.sh`
-`bootstrap-sudoers.sh` 이후 1~4를 순서대로 한 번에 실행하는 래퍼.
-```bash
-sudo ./00-run-all.sh /dev/sda1
-```
+`02-system-update.sh` → `03-timezone.sh` → `04-firewall.sh` → `01-format-mount-data.sh`를 순서대로 그대로 호출하는 래퍼.
 
 ## 방화벽 정책 (`04-firewall.sh`)
 

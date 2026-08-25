@@ -5,9 +5,14 @@ Kubernetes로 옮기기 어려운 워크로드(특정 OS 필요, 컨테이너화
 ## 스크립트
 
 ### 1. `01-setup-libvirt.sh` — 하이퍼바이저 설치 + 스토리지 풀 등록 (양쪽 노드 동일)
-qemu-kvm·libvirt-daemon-system·virtinst 설치, 작업 계정을 libvirt/kvm 그룹에 추가, `/data/vms`를 `data-pool`이라는 libvirt storage pool로 등록.
 ```bash
-sudo ./01-setup-libvirt.sh
+sudo apt-get install -y qemu-kvm libvirt-daemon-system libvirt-clients virtinst bridge-utils
+sudo usermod -aG libvirt,kvm chan
+sudo systemctl enable --now libvirtd
+sudo virsh pool-define-as data-pool dir --target /data/vms
+sudo virsh pool-build data-pool
+sudo virsh pool-start data-pool
+sudo virsh pool-autostart data-pool
 ```
 
 ## 확인

@@ -4,40 +4,60 @@ chan08(컨트롤플레인) + chan09(워커), CNI는 Flannel. Kubernetes v1.36.4 
 
 ## 스크립트 순서
 
-### 1. `01-prereqs.sh` — Kubernetes가 요구하는 커널/네트워크 전제조건 충족
-스왑 비활성화, `br_netfilter`/`overlay` 커널 모듈 로드, `net.ipv4.ip_forward=1` 등 sysctl 적용. 양쪽 노드 모두 실행.
+### 1. `01-prereqs.sh` — Kubernetes가 요구하는 커널/네트워크 전제조건 충족 (양쪽 노드)
 ```bash
-sudo ./01-prereqs.sh
+sudo swapoff -a
+sudo sed -i -E '/\sswap\s/ s/^([^#])/#\1/' /etc/fstab
+sudo modprobe overlay
+sudo modprobe br_netfilter
+```
+`/etc/sysctl.d/k8s.conf`에 아래 세 줄을 추가한 뒤 반영:
+```bash
+net.bridge.bridge-nf-call-iptables  = 1
+net.bridge.bridge-nf-call-ip6tables = 1
+net.ipv4.ip_forward                 = 1
+```
+```bash
+sudo sysctl --system
 ```
 
-### 2. `02-containerd.sh` — 컨테이너 런타임 설치
-containerd 설치 후 `SystemdCgroup = true`로 설정(kubelet의 cgroup 드라이버와 일치시킴). 양쪽 노드 모두 실행.
+### 2. `02-containerd.sh` — 컨테이너 런타임 설치 (양쪽 노드)
 ```bash
-sudo ./02-containerd.sh
+sudo apt-get install -y containerd
+containerd config default | sudo tee /etc/containerd/config.toml > /dev/null
+sudo sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
+sudo systemctl restart containerd
 ```
 
-### 3. `03-kube-packages.sh` — kubeadm/kubelet/kubectl 설치
-pkgs.k8s.io 저장소 등록 후 세 패키지 설치, `apt-mark hold`로 버전 고정. 양쪽 노드 모두 실행.
+### 3. `03-kube-packages.sh` — kubeadm/kubelet/kubectl 설치 (양쪽 노드, v1.36 기준)
 ```bash
-sudo ./03-kube-packages.sh
+curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.36/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.36/deb/ /" | sudo tee /etc/apt/sources.list.d/kubernetes.list
+sudo apt-get update -y
+sudo apt-get install -y kubelet kubeadm kubectl
+sudo apt-mark hold kubelet kubeadm kubectl
 ```
 
 ### 4. `04-init-control-plane.sh` — 컨트롤플레인 초기화 (chan08 전용)
-`kubeadm init`으로 클러스터를 만들고 kubeconfig를 설정한 뒤 Flannel CNI를 설치하고 join 명령을 생성한다.
 ```bash
-sudo ./04-init-control-plane.sh
+sudo kubeadm init --apiserver-advertise-address=10.5.5.8 --pod-network-cidr=10.244.0.0/16
+mkdir -p ~/.kube
+sudo cp -i /etc/kubernetes/admin.conf ~/.kube/config
+sudo chown chan:chan ~/.kube/config
+kubectl apply -f https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml
+kubeadm token create --print-join-command
 ```
 
 ### 5. `05-join-worker.sh` — 워커 합류 (chan09 전용)
-`04`가 만든 `~/join-command.sh`를 이 서버의 홈 디렉터리에 미리 복사해둔 뒤 실행한다.
+`04`의 마지막 명령이 출력한 join 명령을 그대로 실행한다 (토큰과 해시는 실행할 때마다 새로 생성됨).
 ```bash
-sudo ./05-join-worker.sh
+sudo kubeadm join 10.5.5.8:6443 --token <생성된 토큰> --discovery-token-ca-cert-hash sha256:<해시>
 ```
 
-### 6. `06-fix-ufw-forward.sh` — UFW FORWARD 정책 수정 (아래 "알려진 이슈" 참고)
-`/etc/default/ufw`의 `DEFAULT_FORWARD_POLICY`를 `ACCEPT`로 바꾸고 `ufw reload`. 양쪽 노드 모두 실행.
+### 6. `06-fix-ufw-forward.sh` — UFW FORWARD 정책 수정 (아래 "알려진 이슈" 참고, 양쪽 노드)
 ```bash
-sudo ./06-fix-ufw-forward.sh
+sudo sed -i 's/^DEFAULT_FORWARD_POLICY="DROP"/DEFAULT_FORWARD_POLICY="ACCEPT"/' /etc/default/ufw
+sudo ufw reload
 ```
 
 ## 알려진 이슈: UFW가 pod 네트워크를 막음

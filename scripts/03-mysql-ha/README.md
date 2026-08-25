@@ -11,43 +11,84 @@ MySQL 8.0.46, datadir `/data/mysql`, `innodb_buffer_pool_size=2G`. k8s 밖에 �
 ## 스크립트 순서
 
 ### 1. `01-install-mysql.sh` — MySQL 설치 + datadir 이전 (양쪽)
-mysql-server 설치 후 datadir을 `/var/lib/mysql`에서 `/data/mysql`로 이전, AppArmor 로컬 오버라이드 추가.
 ```bash
-sudo ./01-install-mysql.sh
+sudo apt-get install -y mysql-server
+sudo systemctl stop mysql
+sudo mv /var/lib/mysql /var/lib/mysql.bak.<타임스탬프>
+sudo rsync -a /var/lib/mysql.bak.<타임스탬프>/ /data/mysql/
+sudo chown -R mysql:mysql /data/mysql
+```
+AppArmor 로컬 오버라이드에 두 줄 추가 후 재시작:
+```bash
+/data/mysql/ r,
+/data/mysql/** rwk,
+```
+```bash
+sudo systemctl restart apparmor
+```
+`/etc/mysql/mysql.conf.d/zz-datadir.cnf`에 아래 내용 작성(Ubuntu 기본 `mysqld.cnf`의 datadir 줄은 주석 처리돼 있어 sed로 못 건드림):
+```bash
+[mysqld]
+datadir = /data/mysql
+```
+```bash
+sudo systemctl start mysql
 ```
 
-### 2. `02-tune.sh` — buffer pool·server-id·binlog/GTID 설정 (양쪽, server-id 인자 필수)
+### 2. `02-tune.sh` — buffer pool·server-id·binlog/GTID 설정 (양쪽)
+`/etc/mysql/mysql.conf.d/zz-stage1-tuning.cnf`에 아래 내용 작성 (server-id는 chan08=1, chan09=101):
 ```bash
-# chan08
-sudo ./02-tune.sh 1
-# chan09
-sudo ./02-tune.sh 101
+[mysqld]
+innodb_buffer_pool_size = 2G
+server-id = 1
+log_bin = /data/mysql/mysql-bin
+gtid_mode = ON
+enforce_gtid_consistency = ON
+binlog_format = ROW
+bind-address = 0.0.0.0
+```
+```bash
+sudo systemctl restart mysql
 ```
 
 ### 3. `03-generate-secrets.sh` — 복제 비밀번호 / VRRP 인증키 생성 (로컬 관리 머신에서 실행)
-값을 커밋하지 않고 양쪽 서버의 `/root/` 하위 파일로만 배포한다.
 ```bash
-./03-generate-secrets.sh
+openssl rand -base64 24        # 복제 비밀번호
+openssl rand -hex 4            # VRRP 인증키 (8자 제한)
+```
+생성한 두 값을 양쪽 서버의 root 전용 파일로 배포:
+```bash
+ssh 10.5.5.8 "echo '<복제 비밀번호>' | sudo tee /root/.mysql_repl_password"
+ssh 10.5.5.8 "echo '<VRRP 인증키>' | sudo tee /root/.keepalived_vrrp_pass"
+ssh 10.5.5.9 "echo '<복제 비밀번호>' | sudo tee /root/.mysql_repl_password"
+ssh 10.5.5.9 "echo '<VRRP 인증키>' | sudo tee /root/.keepalived_vrrp_pass"
 ```
 
 ### 4. `04-source-setup.sh` — 복제 소스 설정 (chan08 전용)
-복제 계정 생성 + semi-sync source 플러그인 활성화. `03`이 배포한 비밀번호 파일이 먼저 있어야 함.
 ```bash
-sudo ./04-source-setup.sh
+mysql -e "CREATE USER 'replicator'@'10.5.5.%' IDENTIFIED BY '<복제 비밀번호>'; GRANT REPLICATION SLAVE ON *.* TO 'replicator'@'10.5.5.%';"
+mysql -e "INSTALL PLUGIN rpl_semi_sync_source SONAME 'semisync_source.so';"
+mysql -e "SET GLOBAL rpl_semi_sync_source_enabled = 1; SET PERSIST rpl_semi_sync_source_enabled = 1;"
 ```
 
 ### 5. `05-replica-setup.sh` — 복제 레플리카 설정 (chan09 전용)
-semi-sync replica 플러그인 설치 후 `CHANGE REPLICATION SOURCE TO`로 chan08을 소스로 지정하고 복제 시작.
 ```bash
-sudo ./05-replica-setup.sh
+mysql -e "INSTALL PLUGIN rpl_semi_sync_replica SONAME 'semisync_replica.so'; SET GLOBAL rpl_semi_sync_replica_enabled = 1;"
+mysql -e "CHANGE REPLICATION SOURCE TO SOURCE_HOST='10.5.5.8', SOURCE_USER='replicator', SOURCE_PASSWORD='<복제 비밀번호>', SOURCE_AUTO_POSITION=1; START REPLICA;"
 ```
 
-### 6. `06-keepalived.sh` — VIP 페일오버 구성 (양쪽, 역할·우선순위 인자 필수)
+### 6. `06-keepalived.sh` — VIP 페일오버 구성 (양쪽)
 ```bash
-# chan08 (평상시 source, 우선순위 높음)
-sudo ./06-keepalived.sh MASTER 150
-# chan09 (평상시 replica, 우선순위 낮음)
-sudo ./06-keepalived.sh BACKUP 100
+sudo apt-get install -y keepalived
+```
+`/etc/keepalived/keepalived.conf`의 `vrrp_instance` 핵심 값 (chan08 / chan09):
+```bash
+# chan08: state MASTER, priority 150
+# chan09: state BACKUP, priority 100
+# 공통: virtual_ipaddress 10.5.5.210/24
+```
+```bash
+sudo systemctl restart keepalived
 ```
 
 ## 알려진 이슈: `01-install-mysql.sh` 초기 버전 datadir sed 실패
