@@ -15,12 +15,16 @@ MySQL 8.0.46, datadir `/data/mysql`, `innodb_buffer_pool_size=2G`. k8s 밖에 �
 ```bash
 # MySQL 8.0 서버 설치 (설치와 동시에 기본 경로로 자동 기동됨)
 sudo apt-get install -y mysql-server
+
 # 데이터 폴더를 옮기기 전에 서비스 정지
 sudo systemctl stop mysql
+
 # 기존 데이터 폴더를 삭제하지 않고 이름만 바꿔 백업
 sudo mv /var/lib/mysql /var/lib/mysql.bak.<타임스탬프>
+
 # 실제 데이터를 새 위치로 복사 (권한·소유자·타임스탬프 그대로 유지)
 sudo rsync -a /var/lib/mysql.bak.<타임스탬프>/ /data/mysql/
+
 # 복사 과정에서 바뀌었을 수 있는 소유자를 mysql 계정으로 되돌림
 sudo chown -R mysql:mysql /data/mysql
 ```
@@ -64,6 +68,7 @@ sudo systemctl restart mysql
 ```bash
 # 복제 계정용 비밀번호를 예측 불가능한 값으로 생성
 openssl rand -base64 24
+
 # VRRP 인증키 생성 (keepalived auth_pass는 8자 제한)
 openssl rand -hex 4
 ```
@@ -71,10 +76,13 @@ openssl rand -hex 4
 ```bash
 # chan08에 복제 비밀번호 저장
 ssh 10.5.5.8 "echo '<복제 비밀번호>' | sudo tee /root/.mysql_repl_password"
+
 # chan08에 VRRP 인증키 저장
 ssh 10.5.5.8 "echo '<VRRP 인증키>' | sudo tee /root/.keepalived_vrrp_pass"
+
 # chan09에 동일한 복제 비밀번호 저장
 ssh 10.5.5.9 "echo '<복제 비밀번호>' | sudo tee /root/.mysql_repl_password"
+
 # chan09에 동일한 VRRP 인증키 저장
 ssh 10.5.5.9 "echo '<VRRP 인증키>' | sudo tee /root/.keepalived_vrrp_pass"
 ```
@@ -83,8 +91,10 @@ ssh 10.5.5.9 "echo '<VRRP 인증키>' | sudo tee /root/.keepalived_vrrp_pass"
 ```bash
 # 내부망에서만 접속 가능한 복제 전용 계정 생성 + 복제 권한 부여
 mysql -e "CREATE USER 'replicator'@'10.5.5.%' IDENTIFIED BY '<복제 비밀번호>'; GRANT REPLICATION SLAVE ON *.* TO 'replicator'@'10.5.5.%';"
+
 # semi-sync 복제 기능(source 쪽)을 플러그인으로 설치
 mysql -e "INSTALL PLUGIN rpl_semi_sync_source SONAME 'semisync_source.so';"
+
 # semi-sync 활성화 (즉시 적용 + 재시작 후에도 유지)
 mysql -e "SET GLOBAL rpl_semi_sync_source_enabled = 1; SET PERSIST rpl_semi_sync_source_enabled = 1;"
 ```
@@ -93,6 +103,7 @@ mysql -e "SET GLOBAL rpl_semi_sync_source_enabled = 1; SET PERSIST rpl_semi_sync
 ```bash
 # semi-sync 복제 기능(replica 쪽) 설치 및 활성화
 mysql -e "INSTALL PLUGIN rpl_semi_sync_replica SONAME 'semisync_replica.so'; SET GLOBAL rpl_semi_sync_replica_enabled = 1;"
+
 # chan08을 복제 소스로 지정하고 복제 시작 (GTID 기반이라 위치를 직접 지정할 필요 없음)
 mysql -e "CHANGE REPLICATION SOURCE TO SOURCE_HOST='10.5.5.8', SOURCE_USER='replicator', SOURCE_PASSWORD='<복제 비밀번호>', SOURCE_AUTO_POSITION=1; START REPLICA;"
 ```
