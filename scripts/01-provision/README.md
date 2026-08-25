@@ -24,47 +24,67 @@
 ### 0. `bootstrap-sudoers.sh` — NOPASSWD sudo 권한 부여 (사람이 콘솔에 직접 로그인해서 최초 1회 실행)
 이 시점까진 sudo가 비밀번호를 요구해서 SSH로 원격 자동 실행이 불가능하다. 이후 모든 명령은 이 권한을 전제로 원격에서 돈다.
 ```bash
+# NOPASSWD sudo 규칙을 별도 파일로 추가 (visudo가 문법을 검사한 뒤 저장)
 echo "chan ALL=(ALL) NOPASSWD:ALL" | sudo visudo -f /etc/sudoers.d/90-chan-nopasswd
+# 소유자 외 읽기/쓰기 금지 (sudoers.d 파일의 표준 권한)
 sudo chmod 0440 /etc/sudoers.d/90-chan-nopasswd
+# 전체 sudoers 문법 재검증
 sudo visudo -c
 ```
 
 ### 1. `02-system-update.sh` — 패키지 전체 업데이트 + 기본 유틸 설치
 ```bash
+# 패키지 목록 최신화 + 일반 업그레이드 + 커널 등 의존성 큰 업그레이드까지 적용
 sudo apt-get update -y && sudo apt-get upgrade -y && sudo apt-get dist-upgrade -y
+# 이후 스크립트/운영에 필요한 기본 유틸 설치
 sudo apt-get install -y curl wget vim git htop net-tools ca-certificates gnupg lsb-release chrony xfsprogs ufw
+# 더 이상 필요 없는 의존 패키지와 apt 캐시 정리
 sudo apt-get autoremove -y && sudo apt-get autoclean -y
 ```
 
 ### 2. `03-timezone.sh` — 타임존을 Asia/Seoul로 통일
 ```bash
+# 시스템 타임존을 한국 표준시로 변경
 sudo timedatectl set-timezone Asia/Seoul
+# NTP 동기화 서비스(chrony) 활성화 + 즉시 시작
 sudo systemctl enable --now chrony
 ```
 
 ### 3. `04-firewall.sh` — UFW 기본 정책 적용
 ```bash
+# 인바운드는 기본 전체 차단
 sudo ufw default deny incoming
+# 아웃바운드는 기본 전체 허용 (패키지 다운로드 등)
 sudo ufw default allow outgoing
+# 내부망(10.5.5.0/24)에서만 SSH 허용
 sudo ufw allow from 10.5.5.0/24 to any port 22 proto tcp
+# 내부망에서만 Kubernetes API 서버 포트 허용
 sudo ufw allow from 10.5.5.0/24 to any port 6443 proto tcp
 # ... 나머지 포트는 아래 "방화벽 정책" 표 전체 참고
+# 지금까지 만든 규칙을 실제로 적용
 sudo ufw --force enable
 ```
 
 ### 4. `01-format-mount-data.sh` — 데이터 디스크 포맷 + `/data` 마운트 (양쪽 서버 모두 `/dev/sda1`)
 ```bash
+# 디스크 전체를 XFS로 강제 포맷 (기존 데이터 삭제됨)
 sudo mkfs.xfs -f /dev/sda1
+# 재부팅해도 안 바뀌는 UUID 확인
 sudo blkid -s UUID -o value /dev/sda1
 # 출력된 UUID를 /etc/fstab에 한 줄 추가 (예: UUID=2e346eca-8a4d-4d59-8897-4b5d84aefdc3  /data  xfs  defaults  0  2)
+# fstab에 방금 추가한 항목을 즉시 마운트 (재부팅 없이 반영)
 sudo mount -a
 ```
 
 ### 5. `05-firewall-stage1.sh` — 방화벽 Stage 1 재정리
 ```bash
+# MySQL 접속 포트 허용
 sudo ufw allow from 10.5.5.0/24 to any port 3306 proto tcp
+# keepalived의 VRRP 하트비트 허용
 sudo ufw allow from 10.5.5.0/24 proto vrrp
+# Flannel로 확정되어 더 이상 안 쓰는 Calico BGP 포트 제거
 sudo ufw delete allow from 10.5.5.0/24 to any port 179 proto tcp
+# 더 이상 안 쓰는 Calico VXLAN 포트 제거
 sudo ufw delete allow from 10.5.5.0/24 to any port 4789 proto udp
 ```
 
