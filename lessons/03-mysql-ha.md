@@ -9,10 +9,11 @@ MySQL 8.0.46, datadir `/data/mysql`, `innodb_buffer_pool_size=2G`. k8s 밖에 �
 - **복제: semi-sync.** 완전 비동기는 source 장애 시 마지막 트랜잭션 유실 가능, 완전 동기(그룹 복제)는 이 트래픽 규모엔 과한 운영 비용. semi-sync는 최소 1개 복제본의 수신 확인 후 커밋 완료 처리.
 - **장애 전환: keepalived VIP만 자동, source 승격은 수동.** Orchestrator류 자동 승격 도구 대신 채택 — VIP 이동은 자동화하되 실제 쓰기 권한 이전은 사람이 판단(아래 "애플리케이션 연결" 참고).
 
-## 스크립트 순서
+## 스크립트 목록 (이름 순)
 
-### [`01-install-mysql.sh`](../scripts/03-mysql-ha/01-install-mysql.sh)
-MySQL을 설치하고 datadir을 이전한다 (양쪽).
+### MySQL 설치 + datadir 이전
+설명: MySQL을 설치하고 datadir을 이전한다 (양쪽).
+스크립트: [`01-install-mysql.sh`](../scripts/03-mysql-ha/01-install-mysql.sh)
 ```bash
 # MySQL 8.0 서버 설치 (설치와 동시에 기본 경로로 자동 기동됨)
 sudo apt-get install -y mysql-server
@@ -48,8 +49,9 @@ datadir = /data/mysql
 sudo systemctl start mysql
 ```
 
-### [`02-tune.sh`](../scripts/03-mysql-ha/02-tune.sh)
-buffer pool·server-id·binlog/GTID를 설정한다 (양쪽).
+### 튜닝 설정
+설명: buffer pool·server-id·binlog/GTID를 설정한다 (양쪽).
+스크립트: [`02-tune.sh`](../scripts/03-mysql-ha/02-tune.sh)
 `/etc/mysql/mysql.conf.d/zz-stage1-tuning.cnf`에 아래 내용 작성 (server-id는 chan08=1, chan09=101):
 ```bash
 [mysqld]
@@ -66,8 +68,9 @@ bind-address = 0.0.0.0
 sudo systemctl restart mysql
 ```
 
-### [`03-generate-secrets.sh`](../scripts/03-mysql-ha/03-generate-secrets.sh)
-복제 비밀번호 / VRRP 인증키를 생성한다 (로컬 관리 머신에서 실행).
+### 비밀번호/인증키 생성
+설명: 복제 비밀번호 / VRRP 인증키를 생성한다 (로컬 관리 머신에서 실행).
+스크립트: [`03-generate-secrets.sh`](../scripts/03-mysql-ha/03-generate-secrets.sh)
 ```bash
 # 복제 계정용 비밀번호를 예측 불가능한 값으로 생성
 openssl rand -base64 24
@@ -90,8 +93,9 @@ ssh 10.5.5.9 "echo '<복제 비밀번호>' | sudo tee /root/.mysql_repl_password
 ssh 10.5.5.9 "echo '<VRRP 인증키>' | sudo tee /root/.keepalived_vrrp_pass"
 ```
 
-### [`04-source-setup.sh`](../scripts/03-mysql-ha/04-source-setup.sh)
-복제 소스를 설정한다 (chan08 전용).
+### 복제 소스 설정
+설명: 복제 소스를 설정한다 (chan08 전용).
+스크립트: [`04-source-setup.sh`](../scripts/03-mysql-ha/04-source-setup.sh)
 ```bash
 # 내부망에서만 접속 가능한 복제 전용 계정 생성 + 복제 권한 부여
 mysql <<SQL
@@ -109,8 +113,9 @@ mysql -e "SET GLOBAL rpl_semi_sync_source_enabled = 1;"
 mysql -e "SET PERSIST rpl_semi_sync_source_enabled = 1;"
 ```
 
-### [`05-replica-setup.sh`](../scripts/03-mysql-ha/05-replica-setup.sh)
-복제 레플리카를 설정한다 (chan09 전용).
+### 복제 레플리카 설정
+설명: 복제 레플리카를 설정한다 (chan09 전용).
+스크립트: [`05-replica-setup.sh`](../scripts/03-mysql-ha/05-replica-setup.sh)
 ```bash
 # semi-sync 복제 기능(replica 쪽) 설치
 mysql -e "INSTALL PLUGIN rpl_semi_sync_replica SONAME 'semisync_replica.so';"
@@ -130,8 +135,9 @@ START REPLICA;
 SQL
 ```
 
-### [`06-keepalived.sh`](../scripts/03-mysql-ha/06-keepalived.sh)
-VIP 페일오버를 구성한다 (양쪽).
+### VIP 페일오버 구성
+설명: VIP 페일오버를 구성한다 (양쪽).
+스크립트: [`06-keepalived.sh`](../scripts/03-mysql-ha/06-keepalived.sh)
 ```bash
 # VIP 페일오버를 담당하는 프로그램 설치
 sudo apt-get install -y keepalived

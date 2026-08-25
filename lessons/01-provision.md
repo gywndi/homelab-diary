@@ -17,25 +17,33 @@
 - sudo: 부트스트랩 스크립트가 만든 `/etc/sudoers.d/90-chan-nopasswd`로 비밀번호 없이 sudo 가능
 - 관리 서버(작업 실행 위치) IP: 10.5.5.7 — 방화벽 규칙에서 이 대역(10.5.5.0/24)만 허용하므로 락아웃되지 않음
 
-## 스크립트 목록 (실행 순서)
+## 스크립트 목록 (이름 순)
 
 전부 `sudo`로 실행해야 한다. 각 서버 `~/provision/`에도 동일한 스크립트가 복사되어 있다.
 
-### [`bootstrap-sudoers.sh`](../scripts/01-provision/bootstrap-sudoers.sh)
-NOPASSWD sudo 권한을 부여한다 (사람이 콘솔에 직접 로그인해서 최초 1회 실행). 이 시점까진 sudo가 비밀번호를 요구해서 SSH로 원격 자동 실행이 불가능하다. 이후 모든 명령은 이 권한을 전제로 원격에서 돈다.
+### 일괄 실행
+설명: `02-system-update.sh` → `03-timezone.sh` → `04-firewall.sh` → `01-format-mount-data.sh`를 순서대로 그대로 호출하는 래퍼.
+스크립트: [`00-run-all.sh`](../scripts/01-provision/00-run-all.sh)
+
+### 데이터 디스크 포맷 + 마운트
+설명: 데이터 디스크를 포맷하고 `/data`에 마운트한다 (양쪽 서버 모두 `/dev/sda1`).
+스크립트: [`01-format-mount-data.sh`](../scripts/01-provision/01-format-mount-data.sh)
 ```bash
-# NOPASSWD sudo 규칙을 별도 파일로 추가 (visudo가 문법을 검사한 뒤 저장)
-echo "chan ALL=(ALL) NOPASSWD:ALL" | sudo visudo -f /etc/sudoers.d/90-chan-nopasswd
+# 디스크 전체를 XFS로 강제 포맷 (기존 데이터 삭제됨)
+sudo mkfs.xfs -f /dev/sda1
 
-# 소유자 외 읽기/쓰기 금지 (sudoers.d 파일의 표준 권한)
-sudo chmod 0440 /etc/sudoers.d/90-chan-nopasswd
+# 재부팅해도 안 바뀌는 UUID 확인
+sudo blkid -s UUID -o value /dev/sda1
 
-# 전체 sudoers 문법 재검증
-sudo visudo -c
+# 출력된 UUID를 /etc/fstab에 한 줄 추가 (예: UUID=2e346eca-8a4d-4d59-8897-4b5d84aefdc3  /data  xfs  defaults  0  2)
+
+# fstab에 방금 추가한 항목을 즉시 마운트 (재부팅 없이 반영)
+sudo mount -a
 ```
 
-### [`02-system-update.sh`](../scripts/01-provision/02-system-update.sh)
-패키지 전체 업데이트 + 기본 유틸 설치.
+### 패키지 업데이트
+설명: 패키지 전체 업데이트 + 기본 유틸 설치.
+스크립트: [`02-system-update.sh`](../scripts/01-provision/02-system-update.sh)
 ```bash
 # 패키지 목록 최신화 + 일반 업그레이드 + 커널 등 의존성 큰 업그레이드까지 적용
 sudo apt-get update -y && sudo apt-get upgrade -y && sudo apt-get dist-upgrade -y
@@ -50,8 +58,9 @@ sudo apt-get install -y \
 sudo apt-get autoremove -y && sudo apt-get autoclean -y
 ```
 
-### [`03-timezone.sh`](../scripts/01-provision/03-timezone.sh)
-타임존을 Asia/Seoul로 통일한다.
+### 타임존 설정
+설명: 타임존을 Asia/Seoul로 통일한다.
+스크립트: [`03-timezone.sh`](../scripts/01-provision/03-timezone.sh)
 ```bash
 # 시스템 타임존을 한국 표준시로 변경
 sudo timedatectl set-timezone Asia/Seoul
@@ -60,8 +69,9 @@ sudo timedatectl set-timezone Asia/Seoul
 sudo systemctl enable --now chrony
 ```
 
-### [`04-firewall.sh`](../scripts/01-provision/04-firewall.sh)
-UFW 기본 정책을 적용한다.
+### 방화벽 기본 정책
+설명: UFW 기본 정책을 적용한다 (아래 "방화벽 정책" 표 참고).
+스크립트: [`04-firewall.sh`](../scripts/01-provision/04-firewall.sh)
 ```bash
 # 인바운드는 기본 전체 차단
 sudo ufw default deny incoming
@@ -81,23 +91,9 @@ sudo ufw allow from 10.5.5.0/24 to any port 6443 proto tcp
 sudo ufw --force enable
 ```
 
-### [`01-format-mount-data.sh`](../scripts/01-provision/01-format-mount-data.sh)
-데이터 디스크를 포맷하고 `/data`에 마운트한다 (양쪽 서버 모두 `/dev/sda1`).
-```bash
-# 디스크 전체를 XFS로 강제 포맷 (기존 데이터 삭제됨)
-sudo mkfs.xfs -f /dev/sda1
-
-# 재부팅해도 안 바뀌는 UUID 확인
-sudo blkid -s UUID -o value /dev/sda1
-
-# 출력된 UUID를 /etc/fstab에 한 줄 추가 (예: UUID=2e346eca-8a4d-4d59-8897-4b5d84aefdc3  /data  xfs  defaults  0  2)
-
-# fstab에 방금 추가한 항목을 즉시 마운트 (재부팅 없이 반영)
-sudo mount -a
-```
-
-### [`05-firewall-stage1.sh`](../scripts/01-provision/05-firewall-stage1.sh)
-방화벽 Stage 1 재정리.
+### 방화벽 Stage 1 재정리
+설명: MySQL/keepalived 포트 추가, 미사용 Calico 포트 제거.
+스크립트: [`05-firewall-stage1.sh`](../scripts/01-provision/05-firewall-stage1.sh)
 ```bash
 # MySQL 접속 포트 허용
 sudo ufw allow from 10.5.5.0/24 to any port 3306 proto tcp
@@ -112,8 +108,19 @@ sudo ufw delete allow from 10.5.5.0/24 to any port 179 proto tcp
 sudo ufw delete allow from 10.5.5.0/24 to any port 4789 proto udp
 ```
 
-### [`00-run-all.sh`](../scripts/01-provision/00-run-all.sh)
-`02-system-update.sh` → `03-timezone.sh` → `04-firewall.sh` → `01-format-mount-data.sh`를 순서대로 그대로 호출하는 일괄 실행 래퍼.
+### sudo 권한 부여
+설명: NOPASSWD sudo 권한을 부여한다 (사람이 콘솔에 직접 로그인해서 최초 1회 실행). 이 시점까진 sudo가 비밀번호를 요구해서 SSH로 원격 자동 실행이 불가능하다. 이후 모든 명령은 이 권한을 전제로 원격에서 돈다.
+스크립트: [`bootstrap-sudoers.sh`](../scripts/01-provision/bootstrap-sudoers.sh)
+```bash
+# NOPASSWD sudo 규칙을 별도 파일로 추가 (visudo가 문법을 검사한 뒤 저장)
+echo "chan ALL=(ALL) NOPASSWD:ALL" | sudo visudo -f /etc/sudoers.d/90-chan-nopasswd
+
+# 소유자 외 읽기/쓰기 금지 (sudoers.d 파일의 표준 권한)
+sudo chmod 0440 /etc/sudoers.d/90-chan-nopasswd
+
+# 전체 sudoers 문법 재검증
+sudo visudo -c
+```
 
 ## 방화벽 정책 (`04-firewall.sh`)
 
