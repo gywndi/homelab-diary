@@ -21,7 +21,7 @@
 
 전부 `sudo`로 실행해야 한다. 각 서버 `~/provision/`에도 동일한 스크립트가 복사되어 있다.
 
-### 0. `bootstrap-sudoers.sh` — NOPASSWD sudo 권한 부여 (사람이 콘솔에 직접 로그인해서 최초 1회 실행)
+### 0. [`bootstrap-sudoers.sh`](../scripts/01-provision/bootstrap-sudoers.sh) — NOPASSWD sudo 권한 부여 (사람이 콘솔에 직접 로그인해서 최초 1회 실행)
 이 시점까진 sudo가 비밀번호를 요구해서 SSH로 원격 자동 실행이 불가능하다. 이후 모든 명령은 이 권한을 전제로 원격에서 돈다.
 ```bash
 # NOPASSWD sudo 규칙을 별도 파일로 추가 (visudo가 문법을 검사한 뒤 저장)
@@ -34,19 +34,31 @@ sudo chmod 0440 /etc/sudoers.d/90-chan-nopasswd
 sudo visudo -c
 ```
 
-### 1. `02-system-update.sh` — 패키지 전체 업데이트 + 기본 유틸 설치
+### 1. [`02-system-update.sh`](../scripts/01-provision/02-system-update.sh) — 패키지 전체 업데이트 + 기본 유틸 설치
 ```bash
 # 패키지 목록 최신화 + 일반 업그레이드 + 커널 등 의존성 큰 업그레이드까지 적용
 sudo apt-get update -y && sudo apt-get upgrade -y && sudo apt-get dist-upgrade -y
 
 # 이후 스크립트/운영에 필요한 기본 유틸 설치
-sudo apt-get install -y curl wget vim git htop net-tools ca-certificates gnupg lsb-release chrony xfsprogs ufw
+sudo apt-get install -y \
+  curl \
+  wget \
+  vim \
+  git \
+  htop \
+  net-tools \
+  ca-certificates \
+  gnupg \
+  lsb-release \
+  chrony \
+  xfsprogs \
+  ufw
 
 # 더 이상 필요 없는 의존 패키지와 apt 캐시 정리
 sudo apt-get autoremove -y && sudo apt-get autoclean -y
 ```
 
-### 2. `03-timezone.sh` — 타임존을 Asia/Seoul로 통일
+### 2. [`03-timezone.sh`](../scripts/01-provision/03-timezone.sh) — 타임존을 Asia/Seoul로 통일
 ```bash
 # 시스템 타임존을 한국 표준시로 변경
 sudo timedatectl set-timezone Asia/Seoul
@@ -55,7 +67,7 @@ sudo timedatectl set-timezone Asia/Seoul
 sudo systemctl enable --now chrony
 ```
 
-### 3. `04-firewall.sh` — UFW 기본 정책 적용
+### 3. [`04-firewall.sh`](../scripts/01-provision/04-firewall.sh) — UFW 기본 정책 적용
 ```bash
 # 인바운드는 기본 전체 차단
 sudo ufw default deny incoming
@@ -75,7 +87,7 @@ sudo ufw allow from 10.5.5.0/24 to any port 6443 proto tcp
 sudo ufw --force enable
 ```
 
-### 4. `01-format-mount-data.sh` — 데이터 디스크 포맷 + `/data` 마운트 (양쪽 서버 모두 `/dev/sda1`)
+### 4. [`01-format-mount-data.sh`](../scripts/01-provision/01-format-mount-data.sh) — 데이터 디스크 포맷 + `/data` 마운트 (양쪽 서버 모두 `/dev/sda1`)
 ```bash
 # 디스크 전체를 XFS로 강제 포맷 (기존 데이터 삭제됨)
 sudo mkfs.xfs -f /dev/sda1
@@ -89,7 +101,7 @@ sudo blkid -s UUID -o value /dev/sda1
 sudo mount -a
 ```
 
-### 5. `05-firewall-stage1.sh` — 방화벽 Stage 1 재정리
+### 5. [`05-firewall-stage1.sh`](../scripts/01-provision/05-firewall-stage1.sh) — 방화벽 Stage 1 재정리
 ```bash
 # MySQL 접속 포트 허용
 sudo ufw allow from 10.5.5.0/24 to any port 3306 proto tcp
@@ -104,12 +116,12 @@ sudo ufw delete allow from 10.5.5.0/24 to any port 179 proto tcp
 sudo ufw delete allow from 10.5.5.0/24 to any port 4789 proto udp
 ```
 
-### (일괄 실행) `00-run-all.sh`
+### (일괄 실행) [`00-run-all.sh`](../scripts/01-provision/00-run-all.sh)
 `02-system-update.sh` → `03-timezone.sh` → `04-firewall.sh` → `01-format-mount-data.sh`를 순서대로 그대로 호출하는 래퍼.
 
 ## 방화벽 정책 (`04-firewall.sh`)
 
-기본 정책: **인바운드 전체 차단**, 아웃바운드 전체 허용. 인바운드는 내부 대역 `10.5.5.0/24`에서만 아래 포트를 허용합니다.
+기본 정책: **인바운드 전체 차단**, 아웃바운드 전체 허용. 인바운드는 내부 대역 `10.5.5.0/24`에서만 아래 포트를 허용한다.
 
 | 포트 | 프로토콜 | 용도 |
 |------|----------|------|
@@ -131,10 +143,10 @@ sudo ufw delete allow from 10.5.5.0/24 to any port 4789 proto udp
 
 ## 데이터 디스크 (`01-format-mount-data.sh`)
 
-- 대상 디바이스는 서버마다 다르므로 **반드시 인자로 전달**해야 합니다 (하드코딩 안 함).
-- XFS로 강제 포맷(`mkfs.xfs -f`) 하므로 **기존 데이터는 삭제**됩니다. 실행 전 `lsblk`, `blkid`로 대상 디바이스를 재확인할 것.
-- 포맷 후 `blkid`로 UUID를 가져와 `/etc/fstab`에 추가하므로 재부팅해도 자동 마운트됩니다.
-- `/etc/fstab`은 실행 시각이 포함된 타임스탬프로 백업됩니다 (`/etc/fstab.bak.YYYYmmddHHMMSS`).
+- 대상 디바이스는 서버마다 다르므로 **반드시 인자로 전달**해야 한다 (하드코딩 안 함).
+- XFS로 강제 포맷(`mkfs.xfs -f`) 하므로 **기존 데이터는 삭제**된다. 실행 전 `lsblk`, `blkid`로 대상 디바이스를 재확인할 것.
+- 포맷 후 `blkid`로 UUID를 가져와 `/etc/fstab`에 추가하므로 재부팅해도 자동 마운트된다.
+- `/etc/fstab`은 실행 시각이 포함된 타임스탬프로 백업된다 (`/etc/fstab.bak.YYYYmmddHHMMSS`).
 - 포맷 직후 `df -h`에는 약 18G가 "사용 중"으로 표시되는데, 실제 파일이 아니라 Ubuntu 24.04 `mkfs.xfs` 기본 옵션(`reflink=1`, `rmapbt=1`)의 메타데이터 예약 공간이다. 정상.
 
 ## 검증 이력
