@@ -14,4 +14,3 @@
 | [Day 4](lessons/day4-mysql-ha.md) | MySQL active/standby 이중화 (+ datadir 이전 장애 해결기) | [`scripts/mysql-ha/`](scripts/mysql-ha/) |
 | [Day 5](lessons/day5-kvm.md) | KVM 하이퍼바이저 인프라 준비 | [`scripts/kvm/`](scripts/kvm/) |
 
-한 번에 몰아서 읽고 싶다면 [`docs/infra-guide.md`](docs/infra-guide.md) 하나로도 전체를 볼 수 있습니다 (같은 내용을 한 페이지로 합친 버전).

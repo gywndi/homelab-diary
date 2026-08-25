@@ -1,31 +1,14 @@
 # Day 1 — 서버가 나를 알아보게 만들기
 
-> [AI로 함께 만든 클러스터](../README.md) 시리즈 · 대상 서버: chan08(10.5.5.8) · chan09(10.5.5.9) · OS: Ubuntu 24.04 LTS
+> [Homelab Diary](../README.md) 시리즈 · 대상 서버: chan08(10.5.5.8) · chan09(10.5.5.9) · OS: Ubuntu 24.04 LTS
 
-새로 설치한 서버는 매번 비밀번호를 물어보고, 관리자 권한도 없고, 방화벽도 다 잠겨 있습니다. 관리자가 상주하지 않는 서버 두 대를 스크립트로 반복해서 다루려면, 제일 먼저 이 장벽부터 허물어야 했습니다.
+새로 설치한 서버 두 대는 아무것도 모르는 상태였습니다. SSH로 겨우 붙을 수는 있어도 sudo를 쓰려면 매번 비밀번호를 물었고, 방화벽이 열려 있는지 막혀 있는지도 확인이 안 됐습니다. 사람이 상주하지 않는 서버를 스크립트로 계속 다루려면 이 장벽부터 걷어내야 했습니다.
 
-가장 먼저 SSH 키 인증이 걸려 있는지 확인했습니다. 비밀번호 없이 접속은 됐지만, 막상 관리자 권한(sudo)을 쓸 때마다 여전히 비밀번호를 물었습니다. 자동화 스크립트 안에서 비밀번호를 입력할 수는 없으니, chan 계정이 비밀번호 없이 sudo를 쓸 수 있도록 전용 설정 파일을 만들어 권한을 열었습니다.
+먼저 확인한 건 SSH 키 인증이었습니다. `ssh -o BatchMode=yes`로 붙여서 비밀번호를 안 물어보면 통과 — 근데 sudo는 별개였습니다. 자동화 스크립트 안에 비밀번호를 넣을 수는 없으니, `bootstrap-sudoers.sh`를 손으로 딱 한 번 돌려서 `/etc/sudoers.d/90-chan-nopasswd`에 `chan ALL=(ALL) NOPASSWD:ALL`을 넣었습니다. 사람이 직접 개입해야 하는 유일한 단계고, 이후로는 전부 원격에서 스크립트로 끝낼 수 있습니다.
 
-권한이 확보된 다음엔 기본 살림살이를 갖췄습니다. 시스템 패키지를 최신으로 올리고, 타임존을 한국 시간으로 맞추고, 방화벽을 켜되 "일단 다 막고 필요한 것만 연다"는 원칙을 세웠습니다. 마침 1TB짜리 디스크 하나가 언마운트된 채로 놀고 있길래 확인해보니 이미 XFS로 포맷은 되어 있지만 비어 있는 상태였습니다. 그대로 `/data`에 마운트해서, 이후 MySQL 데이터와 가상머신 디스크가 전부 여기에 쌓이게 만들었습니다.
+여기서부터는 순서대로 스크립트를 돌리면 됩니다. `02-system-update.sh`가 `apt-get dist-upgrade`로 커널까지 포함해서 싹 올리고, `03-timezone.sh`가 `timedatectl set-timezone Asia/Seoul`로 시간대를 맞추고 chrony를 켭니다. `04-firewall.sh`는 방화벽 기본값을 "인바운드 전부 차단"으로 세팅한 뒤 `ufw allow from 10.5.5.0/24 to any port 22`로 내부망 SSH만 열어둡니다. 마지막은 `01-format-mount-data.sh` — 놀고 있던 1TB 디스크를 보니 이미 XFS로 포맷은 돼 있는데 마운트만 안 된 상태였습니다. `mkfs.xfs -f`로 새로 밀고 UUID를 뽑아서 `/etc/fstab`에 등록해 `/data`로 고정했습니다. 앞으로 MySQL 데이터도, 가상머신 디스크도 전부 이 안에 쌓일 자리입니다.
 
-## 이 단계에서 쓴 명령어
-
-- **`ssh -o BatchMode=yes 서버주소 명령어`** — 비밀번호 입력 없이 접속되는지 확인하는 용도로 처음부터 끝까지 계속 사용했습니다. `BatchMode=yes`는 만약 키 인증이 안 먹히면 비밀번호를 물어보는 대신 바로 실패시켜서, 스크립트가 멈춰버리는 대신 "안 됨"을 즉시 알 수 있게 해줍니다.
-- **`echo "chan ALL=(ALL) NOPASSWD:ALL" | sudo visudo -f /etc/sudoers.d/90-chan-nopasswd`** — chan 계정이 비밀번호 없이 모든 sudo 명령을 쓸 수 있도록 권한 파일을 새로 만듭니다. 기존 `/etc/sudoers` 파일을 직접 고치지 않고 `sudoers.d` 아래 별도 파일로 추가하는 이유는, 문법 오류가 나도 원본 파일이 안전하고 나중에 이 권한만 따로 지우기도 쉽기 때문입니다. `visudo`를 거치면 저장 전에 문법을 자동으로 검사해줘서 실수로 시스템을 잠그는 사고를 막아줍니다.
-- **`sudo apt-get update && sudo apt-get upgrade -y && sudo apt-get dist-upgrade -y`** — 패키지 목록을 최신화하고, 보안 패치를 포함한 전체 업데이트를 적용합니다. `dist-upgrade`는 일반 `upgrade`와 달리 커널 교체처럼 의존성이 복잡하게 바뀌는 업데이트까지 처리해줍니다.
-- **`sudo timedatectl set-timezone Asia/Seoul`** — 서버 시간대를 한국 표준시로 맞춥니다. 로그 시간이 실제 사건이 벌어진 시간과 어긋나면 나중에 문제를 추적할 때 큰 혼란을 주기 때문에 가장 먼저 손대는 항목 중 하나입니다.
-- **`sudo systemctl enable --now chrony`** — 시간 동기화 서비스를 켭니다. MySQL 복제나 인증서 검증처럼 여러 서버의 시계가 어긋나면 조용히 실패하는 기능들이 많아서, 시간 맞추기는 눈에 안 띄지만 꼭 필요한 작업입니다.
-- **`sudo ufw default deny incoming` / `sudo ufw default allow outgoing`** — 방화벽의 기본 방침을 정합니다. 들어오는 연결은 원칙적으로 전부 막고, 나가는 연결은 허용해서 서버가 인터넷에서 패키지를 받아오는 데는 지장이 없게 합니다.
-- **`sudo ufw allow from 10.5.5.0/24 to any port 22 proto tcp`** — SSH를 완전히 막지 않고, 우리 내부망(10.5.5.0/24)에서만 열어둡니다. 포트 자체를 여는 게 아니라 "어디서 오는 요청인지"까지 같이 지정하는 게 핵심입니다.
-- **`sudo ufw enable`** — 지금까지 만든 규칙들을 실제로 켭니다. 방화벽을 켜는 순간부터 규칙에 없는 접속은 전부 끊기기 때문에, SSH 규칙이 제대로 들어갔는지 먼저 확인한 뒤에 실행했습니다.
-- **`sudo mkfs.xfs -f /dev/sda2`** — 디스크를 XFS 파일시스템으로 포맷합니다. `-f`는 이미 파일시스템이 있어도 강제로 덮어쓰라는 옵션이라, 실행 전에 정말 비어 있는 디스크가 맞는지 두 번 확인했습니다.
-- **`sudo blkid -s UUID -o value /dev/sda2`** — 방금 포맷한 디스크의 고유 식별자(UUID)를 알아냅니다. 디스크 이름(`/dev/sda2`)은 서버를 재부팅하면서 바뀔 수 있지만 UUID는 바뀌지 않기 때문에, 자동 마운트 설정에는 이 값을 씁니다.
-- **`echo "UUID=... /data xfs defaults 0 2" >> /etc/fstab`** — 재부팅해도 이 디스크가 자동으로 `/data`에 마운트되도록 등록합니다. 이 줄이 없으면 서버를 재시작할 때마다 수동으로 마운트해야 합니다.
-- **`sudo mount -a`** — 방금 `/etc/fstab`에 추가한 내용을 즉시 반영해서, 재부팅하지 않고도 `/data`가 바로 마운트되게 합니다.
-
-## 이 레슨에서 쓴 스크립트
-
-[`scripts/provision/`](../scripts/provision/) — `bootstrap-sudoers.sh`(사람이 직접 최초 1회 실행) → `02-system-update.sh` → `03-timezone.sh` → `04-firewall.sh` → `01-format-mount-data.sh`. 순서와 각 스크립트 설명은 [`scripts/provision/README.md`](../scripts/provision/README.md) 참고.
+전체 실행 순서와 각 스크립트가 정확히 뭘 건드리는지는 [`scripts/provision/`](../scripts/provision/README.md)에 정리해뒀습니다.
 
 ---
 ◀ [시리즈 목차](../README.md) · [Day 2 — 방화벽 재정리](day2-firewall.md) ▶

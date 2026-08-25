@@ -29,4 +29,4 @@ kubectl exec dns-test -- nslookup kubernetes.default.svc.cluster.local
 kubectl delete pod dns-test
 ```
 
-kubeconfig는 chan08의 `~/.kube/config`에 있음 (chan 계정용, `kubectl`은 chan08에서 바로 사용 가능).
+kubeconfig는 chan08의 `~/.kube/config`에 있음 (작업 계정용, `kubectl`은 chan08에서 바로 사용 가능).

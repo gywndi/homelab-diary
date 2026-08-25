@@ -4,13 +4,13 @@
 
 ## 대상 서버
 
-| IP        | 호스트명 | OS               | 계정 | 데이터 디스크 |
-|-----------|----------|------------------|------|----------------|
-| 10.5.5.8  | chan08   | Ubuntu 24.04 LTS | chan | `/dev/sda2` (1M 예약 파티션 `sda1` 존재) |
-| 10.5.5.9  | chan09   | Ubuntu 24.04 LTS | chan | `/dev/sda1` (디스크 전체 단일 파티션) |
+| IP        | 호스트명 | OS               | 데이터 디스크 |
+|-----------|----------|------------------|----------------|
+| 10.5.5.8  | chan08   | Ubuntu 24.04 LTS | `/dev/sda1` (디스크 전체 단일 파티션) |
+| 10.5.5.9  | chan09   | Ubuntu 24.04 LTS | `/dev/sda1` (디스크 전체 단일 파티션) |
 
-- 접근: `chan` 계정, SSH 키 인증 (비밀번호 없이 접속)
-- sudo: `/etc/sudoers.d/90-chan-nopasswd` 에 `chan ALL=(ALL) NOPASSWD:ALL` 적용됨 (비밀번호 없이 sudo 가능)
+- 접근: 단일 작업 계정, SSH 키 인증 (비밀번호 없이 접속)
+- sudo: 부트스트랩 스크립트가 만든 `/etc/sudoers.d/90-chan-nopasswd`로 비밀번호 없이 sudo 가능
 - 관리 서버(작업 실행 위치) IP: 10.5.5.7 — 방화벽 규칙에서 이 대역(10.5.5.0/24)만 허용하므로 락아웃되지 않음
 
 ## 스크립트 목록 (실행 순서)
@@ -19,7 +19,7 @@
 
 | 순서 | 파일 | 내용 |
 |------|------|------|
-| 0 | `bootstrap-sudoers.sh` | **사람이 직접 최초 1회 실행.** chan 계정에 NOPASSWD sudo 권한 부여. 이 시점까진 sudo가 비밀번호를 요구해서 원격 자동 실행이 불가능함 |
+| 0 | `bootstrap-sudoers.sh` | **사람이 직접 최초 1회 실행.** 작업 계정에 NOPASSWD sudo 권한 부여. 이 시점까진 sudo가 비밀번호를 요구해서 원격 자동 실행이 불가능함 |
 | 1 | `02-system-update.sh` | `apt update/upgrade/dist-upgrade`, 기본 유틸(curl, vim, git, htop, chrony, xfsprogs, ufw 등) 설치, 불필요 패키지 정리 |
 | 2 | `03-timezone.sh` | 타임존을 `Asia/Seoul`(KST)로 변경, chrony(NTP) 활성화 |
 | 3 | `04-firewall.sh` | UFW 방화벽 설정 (아래 "방화벽 정책" 참고) |
@@ -30,17 +30,14 @@
 ### 사용 예시
 
 ```bash
-# 10.5.5.8
-sudo ~/provision/00-run-all.sh /dev/sda2
-
-# 10.5.5.9
+# 10.5.5.8, 10.5.5.9 공통
 sudo ~/provision/00-run-all.sh /dev/sda1
 ```
 
 개별 실행도 가능합니다 (`01-format-mount-data.sh`만 디바이스 경로 인자 필요):
 
 ```bash
-sudo ~/provision/01-format-mount-data.sh /dev/sda2
+sudo ~/provision/01-format-mount-data.sh /dev/sda1
 ```
 
 ## 방화벽 정책 (`04-firewall.sh`)
