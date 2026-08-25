@@ -1,14 +1,14 @@
 # KVM 하이퍼바이저 인프라 (Stage 1)
 
-실제 VM은 만들지 않고, libvirt와 스토리지 풀만 준비해둔 상태.
+Kubernetes로 옮기기 어려운 워크로드(특정 OS 필요, 컨테이너화 곤란)를 위한 대안. 실제 VM은 만들지 않고, libvirt와 스토리지 풀만 준비해둔 상태.
 
 ## 스크립트
 
-| 파일 | 내용 |
-|------|------|
-| `01-setup-libvirt.sh` | qemu-kvm, libvirt-daemon-system, virtinst 설치, 작업 계정을 libvirt/kvm 그룹에 추가, `/data/vms`를 `data-pool`이라는 libvirt storage pool로 등록 |
-
-양쪽 노드(chan08, chan09) 모두 동일하게 적용됨.
+### 1. `01-setup-libvirt.sh` — 하이퍼바이저 설치 + 스토리지 풀 등록 (양쪽 노드 동일)
+qemu-kvm·libvirt-daemon-system·virtinst 설치, 작업 계정을 libvirt/kvm 그룹에 추가, `/data/vms`를 `data-pool`이라는 libvirt storage pool로 등록.
+```bash
+sudo ./01-setup-libvirt.sh
+```
 
 ## 확인
 

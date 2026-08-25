@@ -2,8 +2,7 @@
 # 전체 초기 설정 실행 (패키지 업데이트 -> 타임존 -> 방화벽 -> 데이터 디스크)
 #
 # 사용법: sudo ./00-run-all.sh /dev/sdaX
-#   10.5.5.8 : sudo ./00-run-all.sh /dev/sda2
-#   10.5.5.9 : sudo ./00-run-all.sh /dev/sda1
+#   10.5.5.8, 10.5.5.9 모두 : sudo ./00-run-all.sh /dev/sda1
 
 set -euo pipefail
 

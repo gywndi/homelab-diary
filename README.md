@@ -1,16 +1,16 @@
 # Homelab Diary
 
-아무것도 깔려 있지 않은 우분투 서버 두 대를, AI와 대화하면서 하나씩 실제로 동작하는 클러스터로 만들어가는 기록입니다. 1화(Stage 1)에서는 Kubernetes, MySQL 이중화, KVM 가상화까지 — 앞으로 뭘 올리든 버틸 수 있는 기반을 다졌습니다. 왜 이런 선택을 했는지, 어디서 막혔는지, 실제로 무슨 명령어를 쳤는지까지 가감 없이 남깁니다.
+우분투 서버 두 대(chan08, chan09)에 Kubernetes 클러스터, MySQL active/standby 이중화, KVM 가상화 기반까지 구성한 프로비저닝 스크립트와 구성 문서 모음입니다.
 
 대상 서버: chan08(10.5.5.8) · chan09(10.5.5.9) · OS: Ubuntu 24.04 LTS
 
-## 시리즈 목차 (1화 — 기반 다지기)
+## 구성 요소 (Stage 1)
 
-| Day | 내용 | 스크립트 |
+| 순서 | 구성 요소 | 문서 |
 |---|---|---|
-| [Day 1](lessons/day1-base-provisioning.md) | 서버가 나를 알아보게 만들기 (SSH, sudo, 패키지, 타임존, 디스크) | [`scripts/provision/`](scripts/provision/) |
-| [Day 2](lessons/day2-firewall.md) | 방화벽, 미리 막고 필요한 것만 열기 | [`scripts/provision/05-firewall-stage1.sh`](scripts/provision/05-firewall-stage1.sh) |
-| [Day 3](lessons/day3-kubernetes.md) | Kubernetes 클러스터 구축 (+ CoreDNS 장애 해결기) | [`scripts/k8s-cluster/`](scripts/k8s-cluster/) |
-| [Day 4](lessons/day4-mysql-ha.md) | MySQL active/standby 이중화 (+ datadir 이전 장애 해결기) | [`scripts/mysql-ha/`](scripts/mysql-ha/) |
-| [Day 5](lessons/day5-kvm.md) | KVM 하이퍼바이저 인프라 준비 | [`scripts/kvm/`](scripts/kvm/) |
+| 1 | 서버 초기 프로비저닝 (SSH, sudo, 패키지, 타임존, 방화벽, 데이터 디스크) | [`scripts/01-provision/`](scripts/01-provision/README.md) |
+| 2 | Kubernetes 클러스터 (2노드, Flannel CNI) | [`scripts/02-k8s-cluster/`](scripts/02-k8s-cluster/README.md) |
+| 3 | MySQL active/standby (semi-sync + keepalived VIP) | [`scripts/03-mysql-ha/`](scripts/03-mysql-ha/README.md) |
+| 4 | KVM 하이퍼바이저 인프라 | [`scripts/04-kvm/`](scripts/04-kvm/README.md) |
 
+각 디렉토리의 README에 목적, 스크립트별 실행 명령, 설계 결정, 알려진 이슈가 정리되어 있습니다.

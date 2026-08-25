@@ -1,18 +1,54 @@
 # MySQL active/standby (Stage 1)
 
 chan08(source) ↔ chan09(replica), semi-sync 복제, keepalived VIP `10.5.5.210`로 페일오버.
-MySQL 8.0.46, datadir `/data/mysql`, `innodb_buffer_pool_size=2G`.
+MySQL 8.0.46, datadir `/data/mysql`, `innodb_buffer_pool_size=2G`. k8s 밖에 호스트 네이티브로 설치 — 클러스터가 흔들려도 데이터는 별도로 보호하기 위함.
+
+## 설계 결정
+
+- **복제: semi-sync.** 완전 비동기는 source 장애 시 마지막 트랜잭션 유실 가능, 완전 동기(그룹 복제)는 이 트래픽 규모엔 과한 운영 비용. semi-sync는 최소 1개 복제본의 수신 확인 후 커밋 완료 처리.
+- **장애 전환: keepalived VIP만 자동, source 승격은 수동.** Orchestrator류 자동 승격 도구 대신 채택 — VIP 이동은 자동화하되 실제 쓰기 권한 이전은 사람이 판단(아래 "애플리케이션 연결" 참고).
 
 ## 스크립트 순서
 
-| 순서 | 파일 | 대상 | 내용 |
-|------|------|------|------|
-| 1 | `01-install-mysql.sh` | 양쪽 | mysql-server 설치, datadir을 `/data/mysql`로 이전, AppArmor 로컬 오버라이드 |
-| 2 | `02-tune.sh <server-id>` | 양쪽 | buffer pool 2G, server-id(chan08=1, chan09=101), binlog/GTID |
-| 3 | `03-generate-secrets.sh` | 로컬(관리 머신) | 복제 비밀번호/VRRP 인증키 생성 후 양쪽 `/root/`에 배포 |
-| 4 | `04-source-setup.sh` | chan08만 | 복제 계정 생성, semi-sync source 플러그인 활성화 |
-| 5 | `05-replica-setup.sh` | chan09만 | semi-sync replica 플러그인, `CHANGE REPLICATION SOURCE TO`, 복제 시작 |
-| 6 | `06-keepalived.sh <MASTER\|BACKUP> <priority>` | 양쪽 | keepalived 설치, VIP 페일오버 구성 |
+### 1. `01-install-mysql.sh` — MySQL 설치 + datadir 이전 (양쪽)
+mysql-server 설치 후 datadir을 `/var/lib/mysql`에서 `/data/mysql`로 이전, AppArmor 로컬 오버라이드 추가.
+```bash
+sudo ./01-install-mysql.sh
+```
+
+### 2. `02-tune.sh` — buffer pool·server-id·binlog/GTID 설정 (양쪽, server-id 인자 필수)
+```bash
+# chan08
+sudo ./02-tune.sh 1
+# chan09
+sudo ./02-tune.sh 101
+```
+
+### 3. `03-generate-secrets.sh` — 복제 비밀번호 / VRRP 인증키 생성 (로컬 관리 머신에서 실행)
+값을 커밋하지 않고 양쪽 서버의 `/root/` 하위 파일로만 배포한다.
+```bash
+./03-generate-secrets.sh
+```
+
+### 4. `04-source-setup.sh` — 복제 소스 설정 (chan08 전용)
+복제 계정 생성 + semi-sync source 플러그인 활성화. `03`이 배포한 비밀번호 파일이 먼저 있어야 함.
+```bash
+sudo ./04-source-setup.sh
+```
+
+### 5. `05-replica-setup.sh` — 복제 레플리카 설정 (chan09 전용)
+semi-sync replica 플러그인 설치 후 `CHANGE REPLICATION SOURCE TO`로 chan08을 소스로 지정하고 복제 시작.
+```bash
+sudo ./05-replica-setup.sh
+```
+
+### 6. `06-keepalived.sh` — VIP 페일오버 구성 (양쪽, 역할·우선순위 인자 필수)
+```bash
+# chan08 (평상시 source, 우선순위 높음)
+sudo ./06-keepalived.sh MASTER 150
+# chan09 (평상시 replica, 우선순위 낮음)
+sudo ./06-keepalived.sh BACKUP 100
+```
 
 ## 알려진 이슈: `01-install-mysql.sh` 초기 버전 datadir sed 실패
 
