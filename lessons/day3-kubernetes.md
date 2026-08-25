@@ -36,7 +36,7 @@ Kubernetes는 한마디로 "어떤 서버에 어떤 프로그램을 띄울지"�
 
 ## 이 레슨에서 쓴 스크립트
 
-[`k8s-cluster/`](../k8s-cluster/) — `01-prereqs.sh` → `02-containerd.sh` → `03-kube-packages.sh` → `04-init-control-plane.sh`(chan08) → `05-join-worker.sh`(chan09) → `06-fix-ufw-forward.sh`(위 문제 해결). 상세는 [`k8s-cluster/README.md`](../k8s-cluster/README.md) 참고.
+[`scripts/k8s-cluster/`](../scripts/k8s-cluster/) — `01-prereqs.sh` → `02-containerd.sh` → `03-kube-packages.sh` → `04-init-control-plane.sh`(chan08) → `05-join-worker.sh`(chan09) → `06-fix-ufw-forward.sh`(위 문제 해결). 상세는 [`scripts/k8s-cluster/README.md`](../scripts/k8s-cluster/README.md) 참고.
 
 ---
 ◀ [Day 2 — 방화벽 재정리](day2-firewall.md) · [시리즈 목차](../README.md) · [Day 4 — MySQL 이중화](day4-mysql-ha.md) ▶

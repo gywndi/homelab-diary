@@ -17,7 +17,7 @@
 
 ## 이 레슨에서 쓴 스크립트
 
-[`provision/05-firewall-stage1.sh`](../provision/05-firewall-stage1.sh) — MySQL/keepalived 포트 추가, 안 쓰는 Calico 포트 제거. Day 1의 초기 방화벽(`provision/04-firewall.sh`)에 이어 적용됩니다.
+[`scripts/provision/05-firewall-stage1.sh`](../scripts/provision/05-firewall-stage1.sh) — MySQL/keepalived 포트 추가, 안 쓰는 Calico 포트 제거. Day 1의 초기 방화벽(`scripts/provision/04-firewall.sh`)에 이어 적용됩니다.
 
 ---
 ◀ [Day 1 — 서버 기본 준비](day1-base-provisioning.md) · [시리즈 목차](../README.md) · [Day 3 — Kubernetes](day3-kubernetes.md) ▶

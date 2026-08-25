@@ -25,7 +25,7 @@
 
 ## 이 레슨에서 쓴 스크립트
 
-[`provision/`](../provision/) — `bootstrap-sudoers.sh`(사람이 직접 최초 1회 실행) → `02-system-update.sh` → `03-timezone.sh` → `04-firewall.sh` → `01-format-mount-data.sh`. 순서와 각 스크립트 설명은 [`provision/README.md`](../provision/README.md) 참고.
+[`scripts/provision/`](../scripts/provision/) — `bootstrap-sudoers.sh`(사람이 직접 최초 1회 실행) → `02-system-update.sh` → `03-timezone.sh` → `04-firewall.sh` → `01-format-mount-data.sh`. 순서와 각 스크립트 설명은 [`scripts/provision/README.md`](../scripts/provision/README.md) 참고.
 
 ---
 ◀ [시리즈 목차](../README.md) · [Day 2 — 방화벽 재정리](day2-firewall.md) ▶

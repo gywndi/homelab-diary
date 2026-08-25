@@ -8,10 +8,10 @@
 
 | Day | 내용 | 스크립트 |
 |---|---|---|
-| [Day 1](lessons/day1-base-provisioning.md) | 서버가 나를 알아보게 만들기 (SSH, sudo, 패키지, 타임존, 디스크) | [`provision/`](provision/) |
-| [Day 2](lessons/day2-firewall.md) | 방화벽, 미리 막고 필요한 것만 열기 | [`provision/05-firewall-stage1.sh`](provision/05-firewall-stage1.sh) |
-| [Day 3](lessons/day3-kubernetes.md) | Kubernetes 클러스터 구축 (+ CoreDNS 장애 해결기) | [`k8s-cluster/`](k8s-cluster/) |
-| [Day 4](lessons/day4-mysql-ha.md) | MySQL active/standby 이중화 (+ datadir 이전 장애 해결기) | [`mysql-ha/`](mysql-ha/) |
-| [Day 5](lessons/day5-kvm.md) | KVM 하이퍼바이저 인프라 준비 | [`kvm/`](kvm/) |
+| [Day 1](lessons/day1-base-provisioning.md) | 서버가 나를 알아보게 만들기 (SSH, sudo, 패키지, 타임존, 디스크) | [`scripts/provision/`](scripts/provision/) |
+| [Day 2](lessons/day2-firewall.md) | 방화벽, 미리 막고 필요한 것만 열기 | [`scripts/provision/05-firewall-stage1.sh`](scripts/provision/05-firewall-stage1.sh) |
+| [Day 3](lessons/day3-kubernetes.md) | Kubernetes 클러스터 구축 (+ CoreDNS 장애 해결기) | [`scripts/k8s-cluster/`](scripts/k8s-cluster/) |
+| [Day 4](lessons/day4-mysql-ha.md) | MySQL active/standby 이중화 (+ datadir 이전 장애 해결기) | [`scripts/mysql-ha/`](scripts/mysql-ha/) |
+| [Day 5](lessons/day5-kvm.md) | KVM 하이퍼바이저 인프라 준비 | [`scripts/kvm/`](scripts/kvm/) |
 
 한 번에 몰아서 읽고 싶다면 [`docs/infra-guide.md`](docs/infra-guide.md) 하나로도 전체를 볼 수 있습니다 (같은 내용을 한 페이지로 합친 버전).

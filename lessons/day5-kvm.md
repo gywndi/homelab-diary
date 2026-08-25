@@ -19,7 +19,7 @@ Kubernetes로 옮기기 애매한 워크로드, 이를테면 특정 운영체제
 
 ## 이 레슨에서 쓴 스크립트
 
-[`kvm/01-setup-libvirt.sh`](../kvm/01-setup-libvirt.sh) — 상세는 [`kvm/README.md`](../kvm/README.md) 참고.
+[`scripts/kvm/01-setup-libvirt.sh`](../scripts/kvm/01-setup-libvirt.sh) — 상세는 [`scripts/kvm/README.md`](../scripts/kvm/README.md) 참고.
 
 ## Day 1~5를 마치고
 

@@ -41,7 +41,7 @@
 
 ## 이 레슨에서 쓴 스크립트
 
-[`mysql-ha/`](../mysql-ha/) — `01-install-mysql.sh` → `02-tune.sh` → `03-generate-secrets.sh`(로컬에서 실행) → `04-source-setup.sh`(chan08) → `05-replica-setup.sh`(chan09) → `06-keepalived.sh`. 겪었던 문제와 페일오버 검증 로그는 [`mysql-ha/README.md`](../mysql-ha/README.md)에 더 자세히 있습니다.
+[`scripts/mysql-ha/`](../scripts/mysql-ha/) — `01-install-mysql.sh` → `02-tune.sh` → `03-generate-secrets.sh`(로컬에서 실행) → `04-source-setup.sh`(chan08) → `05-replica-setup.sh`(chan09) → `06-keepalived.sh`. 겪었던 문제와 페일오버 검증 로그는 [`scripts/mysql-ha/README.md`](../scripts/mysql-ha/README.md)에 더 자세히 있습니다.
 
 ---
 ◀ [Day 3 — Kubernetes](day3-kubernetes.md) · [시리즈 목차](../README.md) · [Day 5 — KVM](day5-kvm.md) ▶
