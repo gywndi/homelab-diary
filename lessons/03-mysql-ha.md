@@ -11,7 +11,8 @@ MySQL 8.0.46, datadir `/data/mysql`, `innodb_buffer_pool_size=2G`. k8s 밖에 �
 
 ## 스크립트 순서
 
-### 1. [`01-install-mysql.sh`](../scripts/03-mysql-ha/01-install-mysql.sh) — MySQL 설치 + datadir 이전 (양쪽)
+### [`01-install-mysql.sh`](../scripts/03-mysql-ha/01-install-mysql.sh)
+MySQL을 설치하고 datadir을 이전한다 (양쪽).
 ```bash
 # MySQL 8.0 서버 설치 (설치와 동시에 기본 경로로 자동 기동됨)
 sudo apt-get install -y mysql-server
@@ -47,7 +48,8 @@ datadir = /data/mysql
 sudo systemctl start mysql
 ```
 
-### 2. [`02-tune.sh`](../scripts/03-mysql-ha/02-tune.sh) — buffer pool·server-id·binlog/GTID 설정 (양쪽)
+### [`02-tune.sh`](../scripts/03-mysql-ha/02-tune.sh)
+buffer pool·server-id·binlog/GTID를 설정한다 (양쪽).
 `/etc/mysql/mysql.conf.d/zz-stage1-tuning.cnf`에 아래 내용 작성 (server-id는 chan08=1, chan09=101):
 ```bash
 [mysqld]
@@ -64,7 +66,8 @@ bind-address = 0.0.0.0
 sudo systemctl restart mysql
 ```
 
-### 3. [`03-generate-secrets.sh`](../scripts/03-mysql-ha/03-generate-secrets.sh) — 복제 비밀번호 / VRRP 인증키 생성 (로컬 관리 머신에서 실행)
+### [`03-generate-secrets.sh`](../scripts/03-mysql-ha/03-generate-secrets.sh)
+복제 비밀번호 / VRRP 인증키를 생성한다 (로컬 관리 머신에서 실행).
 ```bash
 # 복제 계정용 비밀번호를 예측 불가능한 값으로 생성
 openssl rand -base64 24
@@ -87,7 +90,8 @@ ssh 10.5.5.9 "echo '<복제 비밀번호>' | sudo tee /root/.mysql_repl_password
 ssh 10.5.5.9 "echo '<VRRP 인증키>' | sudo tee /root/.keepalived_vrrp_pass"
 ```
 
-### 4. [`04-source-setup.sh`](../scripts/03-mysql-ha/04-source-setup.sh) — 복제 소스 설정 (chan08 전용)
+### [`04-source-setup.sh`](../scripts/03-mysql-ha/04-source-setup.sh)
+복제 소스를 설정한다 (chan08 전용).
 ```bash
 # 내부망에서만 접속 가능한 복제 전용 계정 생성 + 복제 권한 부여
 mysql <<SQL
@@ -105,7 +109,8 @@ mysql -e "SET GLOBAL rpl_semi_sync_source_enabled = 1;"
 mysql -e "SET PERSIST rpl_semi_sync_source_enabled = 1;"
 ```
 
-### 5. [`05-replica-setup.sh`](../scripts/03-mysql-ha/05-replica-setup.sh) — 복제 레플리카 설정 (chan09 전용)
+### [`05-replica-setup.sh`](../scripts/03-mysql-ha/05-replica-setup.sh)
+복제 레플리카를 설정한다 (chan09 전용).
 ```bash
 # semi-sync 복제 기능(replica 쪽) 설치
 mysql -e "INSTALL PLUGIN rpl_semi_sync_replica SONAME 'semisync_replica.so';"
@@ -125,7 +130,8 @@ START REPLICA;
 SQL
 ```
 
-### 6. [`06-keepalived.sh`](../scripts/03-mysql-ha/06-keepalived.sh) — VIP 페일오버 구성 (양쪽)
+### [`06-keepalived.sh`](../scripts/03-mysql-ha/06-keepalived.sh)
+VIP 페일오버를 구성한다 (양쪽).
 ```bash
 # VIP 페일오버를 담당하는 프로그램 설치
 sudo apt-get install -y keepalived
