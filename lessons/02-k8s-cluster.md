@@ -119,14 +119,19 @@ sudo ufw reload
 ## 검증
 
 ```bash
-kubectl get nodes -o wide         # chan08, chan09 모두 Ready
+# 노드 상태 확인 (chan08, chan09 모두 Ready여야 함)
+kubectl get nodes -o wide
 
-kubectl get pods -A               # kube-system, kube-flannel 전부 1/1 Running
+# 시스템 파드 상태 확인 (kube-system, kube-flannel 전부 1/1 Running이어야 함)
+kubectl get pods -A
 
+# 클러스터 내부 DNS 테스트용 파드 실행
 kubectl run dns-test --image=busybox:1.36 --restart=Never --command -- sleep 3600
 
+# 테스트 파드에서 클러스터 내부 도메인 조회
 kubectl exec dns-test -- nslookup kubernetes.default.svc.cluster.local
 
+# 테스트 파드 정리
 kubectl delete pod dns-test
 ```
 

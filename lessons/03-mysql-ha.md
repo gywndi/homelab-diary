@@ -166,8 +166,8 @@ MySQL 클라이언트는 **VIP `10.5.5.210:3306`**으로 접속. 어느 쪽이 s
 ## 검증 명령
 
 ```bash
-# 복제 상태
-sudo mysql -e "SHOW REPLICA STATUS\G"   # chan09에서
+# 복제 상태 확인 (chan09에서 실행)
+sudo mysql -e "SHOW REPLICA STATUS\G"
 
 # semi-sync 상태
 sudo mysql -e "SHOW STATUS LIKE 'Rpl_semi_sync%';"

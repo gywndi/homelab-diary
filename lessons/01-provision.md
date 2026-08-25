@@ -41,18 +41,9 @@ sudo apt-get update -y && sudo apt-get upgrade -y && sudo apt-get dist-upgrade -
 
 # 이후 스크립트/운영에 필요한 기본 유틸 설치
 sudo apt-get install -y \
-  curl \
-  wget \
-  vim \
-  git \
-  htop \
-  net-tools \
-  ca-certificates \
-  gnupg \
-  lsb-release \
-  chrony \
-  xfsprogs \
-  ufw
+  curl wget vim git \
+  htop net-tools ca-certificates gnupg \
+  lsb-release chrony xfsprogs ufw
 
 # 더 이상 필요 없는 의존 패키지와 apt 캐시 정리
 sudo apt-get autoremove -y && sudo apt-get autoclean -y

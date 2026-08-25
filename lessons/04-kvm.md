@@ -31,9 +31,11 @@ sudo virsh pool-autostart data-pool
 ## 확인
 
 ```bash
-virsh list --all          # 현재 VM 없음 (정상)
+# 현재 VM 목록 확인 (없는 게 정상)
+virsh list --all
 
-virsh pool-list --all     # data-pool  active  yes
+# 스토리지 풀 상태 확인 (data-pool이 active여야 함)
+virsh pool-list --all
 ```
 
 ## 다음 VM을 만들 때
