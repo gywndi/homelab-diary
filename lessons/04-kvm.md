@@ -5,8 +5,8 @@ Kubernetes로 옮기기 어려운 워크로드(특정 OS 필요, 컨테이너화
 ## 스크립트 목록 (이름 순)
 
 ### 하이퍼바이저 설치 + 스토리지 풀 등록
-설명: 하이퍼바이저를 설치하고 스토리지 풀을 등록한다 (양쪽 노드 동일).
-스크립트: [`01-setup-libvirt.sh`](../scripts/04-kvm/01-setup-libvirt.sh)
+- 설명: 하이퍼바이저를 설치하고 스토리지 풀을 등록한다 (양쪽 노드 동일).
+- 스크립트: [`01-setup-libvirt.sh`](../scripts/04-kvm/01-setup-libvirt.sh)
 ```bash
 # 하이퍼바이저(qemu-kvm)와 관리 데몬(libvirt), VM 생성 도구 설치
 sudo apt-get install -y qemu-kvm libvirt-daemon-system libvirt-clients virtinst bridge-utils

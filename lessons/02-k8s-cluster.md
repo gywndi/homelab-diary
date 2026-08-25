@@ -5,8 +5,8 @@ chan08(컨트롤플레인) + chan09(워커), CNI는 Flannel. Kubernetes v1.36.4 
 ## 스크립트 목록 (이름 순)
 
 ### 커널/네트워크 전제조건
-설명: Kubernetes가 요구하는 커널/네트워크 전제조건을 충족시킨다 (양쪽 노드).
-스크립트: [`01-prereqs.sh`](../scripts/02-k8s-cluster/01-prereqs.sh)
+- 설명: Kubernetes가 요구하는 커널/네트워크 전제조건을 충족시킨다 (양쪽 노드).
+- 스크립트: [`01-prereqs.sh`](../scripts/02-k8s-cluster/01-prereqs.sh)
 ```bash
 # 지금 켜져 있는 스왑을 즉시 끄기 (k8s는 스왑 켜진 노드를 허용 안 함)
 sudo swapoff -a
@@ -37,8 +37,8 @@ sudo sysctl --system
 ```
 
 ### 컨테이너 런타임 설치
-설명: 컨테이너 런타임을 설치한다 (양쪽 노드).
-스크립트: [`02-containerd.sh`](../scripts/02-k8s-cluster/02-containerd.sh)
+- 설명: 컨테이너 런타임을 설치한다 (양쪽 노드).
+- 스크립트: [`02-containerd.sh`](../scripts/02-k8s-cluster/02-containerd.sh)
 ```bash
 # 컨테이너 런타임 설치
 sudo apt-get install -y containerd
@@ -54,8 +54,8 @@ sudo systemctl restart containerd
 ```
 
 ### kubeadm/kubelet/kubectl 설치
-설명: kubeadm/kubelet/kubectl을 설치한다 (양쪽 노드, v1.36 기준).
-스크립트: [`03-kube-packages.sh`](../scripts/02-k8s-cluster/03-kube-packages.sh)
+- 설명: kubeadm/kubelet/kubectl을 설치한다 (양쪽 노드, v1.36 기준).
+- 스크립트: [`03-kube-packages.sh`](../scripts/02-k8s-cluster/03-kube-packages.sh)
 ```bash
 # Kubernetes 공식 저장소 서명 키를 받아와 등록 (패키지 위변조 검증용)
 curl -fsSL "https://pkgs.k8s.io/core:/stable:/v1.36/deb/Release.key" \
@@ -76,8 +76,8 @@ sudo apt-mark hold kubelet kubeadm kubectl
 ```
 
 ### 컨트롤플레인 초기화
-설명: 컨트롤플레인을 초기화한다 (chan08 전용).
-스크립트: [`04-init-control-plane.sh`](../scripts/02-k8s-cluster/04-init-control-plane.sh)
+- 설명: 컨트롤플레인을 초기화한다 (chan08 전용).
+- 스크립트: [`04-init-control-plane.sh`](../scripts/02-k8s-cluster/04-init-control-plane.sh)
 ```bash
 # 컨트롤플레인 초기화. 파드에 나눠줄 내부 IP 대역을 Flannel 기본값에 맞춤
 sudo kubeadm init \
@@ -101,8 +101,8 @@ kubeadm token create --print-join-command
 ```
 
 ### 워커 합류
-설명: 워커를 클러스터에 합류시킨다 (chan09 전용). 컨트롤플레인 초기화의 마지막 명령이 출력한 join 명령을 그대로 실행한다 (토큰과 해시는 실행할 때마다 새로 생성됨).
-스크립트: [`05-join-worker.sh`](../scripts/02-k8s-cluster/05-join-worker.sh)
+- 설명: 워커를 클러스터에 합류시킨다 (chan09 전용). 컨트롤플레인 초기화의 마지막 명령이 출력한 join 명령을 그대로 실행한다 (토큰과 해시는 실행할 때마다 새로 생성됨).
+- 스크립트: [`05-join-worker.sh`](../scripts/02-k8s-cluster/05-join-worker.sh)
 ```bash
 # chan08이 출력한 토큰/해시로 이 노드를 클러스터에 워커로 합류시킴
 sudo kubeadm join 10.5.5.8:6443 \
@@ -111,8 +111,8 @@ sudo kubeadm join 10.5.5.8:6443 \
 ```
 
 ### UFW FORWARD 정책 수정
-설명: UFW FORWARD 정책을 수정한다 (아래 "알려진 이슈" 참고, 양쪽 노드).
-스크립트: [`06-fix-ufw-forward.sh`](../scripts/02-k8s-cluster/06-fix-ufw-forward.sh)
+- 설명: UFW FORWARD 정책을 수정한다 (아래 "알려진 이슈" 참고, 양쪽 노드).
+- 스크립트: [`06-fix-ufw-forward.sh`](../scripts/02-k8s-cluster/06-fix-ufw-forward.sh)
 ```bash
 # 서버를 그냥 거쳐가는(FORWARD) 트래픽까지 막던 기본 정책을 ACCEPT로 변경
 sudo sed -i 's/^DEFAULT_FORWARD_POLICY="DROP"/DEFAULT_FORWARD_POLICY="ACCEPT"/' /etc/default/ufw
