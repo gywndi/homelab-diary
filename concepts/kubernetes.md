@@ -74,6 +74,15 @@ kubectl -n kube-system exec etcd-chan08 -- etcdctl member list \
 - **kubelet/controller-manager/scheduler의 kubeconfig는 VIP가 아니라 각자 자기 자신의 IP를 본다** — kubeadm이 컨트롤플레인 노드마다 그렇게 자동 생성해준다. 로컬 apiserver가 제일 빠르고, 그 노드가 살아있으면 로컬 apiserver도 살아있다고 보기 때문에 의도된 동작이다. 그래서 이 공유 진입점은 사실상 `admin.conf`(사람이 쓰는 kubectl 접속)용으로만 쓰인다. 자세한 절차는 [`06-llm-gpu-node.md`](../lessons/06-llm-gpu-node.md) 참고.
 - **왜 VIP(keepalived)고 DNS 라운드로빈/페일오버는 아닌지.** 도메인 하나에 여러 IP를 걸어두는 방식(멀티 데이터센터처럼 VRRP가 아예 안 되는 환경에서 흔히 씀)도 기능적으로는 가능하다. 하지만 DNS는 "누가 살아있는지" 자체를 모른다 — 죽은 IP로 접속을 실제로 시도해서 실패한 뒤에야 재시도하고, TTL을 아무리 낮춰도 헬스체크와 레코드 갱신을 능동적으로 해주는 별도 장치(Route53 헬스체크 같은) 없이는 그마저도 안 되며, 캐시 전파 시간만큼 항상 VIP보다 느리다. VRRP(keepalived)는 같은 서브넷(L2)에 있어야 한다는 제약이 있는 대신, 캐시 계층 없이 초 단위로 즉시 넘어간다. 우리는 3대가 전부 같은 서브넷(10.5.5.0/24)이라 VRRP 제약에 안 걸리므로 VIP 쪽을 택했다 — 노드가 서로 다른 네트워크(멀티 사이트)에 흩어지는 상황이 오면 그때는 DNS 기반 페일오버로 갈아타야 한다.
 
+### API 서버를 꼭 거쳐야 하나 — 우회 경로
+kubectl, kube-scheduler, kube-controller-manager, kubelet의 상태 보고는 전부 API 서버를 거친다. **etcd에 직접 쓰는 컴포넌트는 API 서버 하나뿐**이다 — 인증/권한(RBAC), 유효성 검사(admission control), 감사 로그, watch 알림이 전부 API 서버 한 곳에 모여야 일관성이 보장되기 때문. 하지만 긴급 상황에서 API 서버를 우회하는 진짜 콘솔 레벨 경로도 있고, 이 저장소를 다루면서 실제로 다 써봤다:
+- **정적 파드 매니페스트 직접 조작**: `/etc/kubernetes/manifests/*.yaml`을 옮겼다 되돌리면 kubelet이 그 노드 로컬 파일을 직접 읽어서 파드를 재기동한다 (API 서버는 관여 안 함). chan08 apiserver 인증서를 갱신한 뒤 이 방법으로 재기동시켰다 — 애초에 이 방식이 없으면 "apiserver를 띄우려면 apiserver가 필요하다"는 모순이 생긴다.
+- **etcd에 직접 질의**: `etcdctl snapshot save`, `etcdctl member list`를 API 서버가 아니라 etcd(`--endpoints=https://127.0.0.1:2379`)에 바로 물었다. API 서버가 완전히 죽어도 이 명령들은 그대로 동작한다.
+- **컨테이너 런타임 직접 조회**: `ctr -n k8s.io containers ls`처럼 containerd에 바로 물어보면 kubelet/API 서버 없이도 그 노드에 뭐가 떠 있는지 확인 가능.
+- **kubeadm reset/join**: 근본적으로 그 노드의 로컬 파일(`/etc/kubernetes/`, `/var/lib/kubelet/`)을 직접 조작하는 호스트 작업이다.
+
+컨트롤플레인 전체가 죽어서 API 서버가 하나도 안 뜨는 최악의 상황이면: 이미 떠 있던 애플리케이션 파드는 kubelet이 로컬 캐시로 계속 관리해서 안 사라지고(새 스케줄링만 멈춤), 복구는 API 서버 없이도 되는 etcd 스냅샷(`07-etcd-backup.sh`)으로 한다.
+
 ### 2. DaemonSet — kube-flannel, kube-proxy, metallb-system/speaker (전부 노드마다 하나씩)
 ```bash
 kubectl -n kube-flannel get pods -o wide
@@ -187,7 +196,12 @@ Kubernetes가 다루는 가장 작은 배포 단위. 컨테이너 하나(또는 
 - **DaemonSet**: "모든 노드에 하나씩" 뜨는 특수한 형태. 예: MetalLB의 speaker, kube-proxy가 이 방식.
 
 ### 네임스페이스(Namespace)
-같은 클러스터 안에서 리소스를 논리적으로 구분하는 폴더 같은 개념. `metallb-system`, `ingress-nginx`, `cert-manager`처럼 컴포넌트별로 네임스페이스를 나눠서 설치한다.
+같은 클러스터 안에서 리소스를 논리적으로 구분하는 "구역" 개념. `metallb-system`, `ingress-nginx`, `cert-manager`처럼 컴포넌트별로 네임스페이스를 나눠서 설치한다. 같은 이름의 리소스도 네임스페이스가 다르면 완전히 별개로 존재한다.
+
+- **실전에서 제일 자주 걸리는 함정**: `kubectl get pods`만 치면 `default` 네임스페이스만 보여준다. 우리가 설치한 인프라 컴포넌트는 거의 다 `default`가 아니라 각자 전용 네임스페이스에 있어서 아무것도 안 보인다 — 그래서 이 문서 전체에서 `-n metallb-system`처럼 네임스페이스를 지정하거나, 전체를 다 보는 `-A`(all namespaces)를 계속 붙인다.
+- **모든 리소스가 네임스페이스에 속하지는 않는다.** Pod, Deployment, Service, ConfigMap, Secret 등은 네임스페이스에 속하지만(namespaced), Node, PersistentVolume, ClusterRole, ClusterIssuer, Namespace 자체 같은 건 클러스터 전체 단위라 네임스페이스가 없다(cluster-scoped) — `kubectl get node`에 `-n`이 안 먹히는 이유다.
+- **다른 네임스페이스의 Service는 이름만으론 못 부른다.** 같은 네임스페이스 안에서는 서비스 이름만 써도 되지만, 다른 네임스페이스의 Service를 부르려면 `서비스이름.네임스페이스.svc.cluster.local`처럼 네임스페이스를 붙여야 CoreDNS가 찾아준다.
+- **Namespace와 Label은 다르다.** Namespace는 리소스가 "어디 소속"인지 정하는 딱딱한 경계(리소스 하나는 정확히 하나에만 속함)고, Label은 그냥 붙이는 태그(하나에 여러 개 가능, 격리 경계가 아니라 검색/필터링용)다. 이 문서에서 파드 배치 이유를 조회할 때 `kubectl -n kube-system get pods -l tier=control-plane`처럼 **네임스페이스로 먼저 구역을 좁히고, 그 안에서 라벨로 더 세밀하게 필터링**하는 조합을 계속 쓰는 이유다.
 
 ## 네트워킹
 
