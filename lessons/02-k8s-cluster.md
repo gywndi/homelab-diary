@@ -121,11 +121,41 @@ sudo sed -i 's/^DEFAULT_FORWARD_POLICY="DROP"/DEFAULT_FORWARD_POLICY="ACCEPT"/' 
 sudo ufw reload
 ```
 
+### etcd 백업
+- 설명: 컨트롤플레인이 chan08 하나뿐이라 etcd도 단일 장애점이다. 주기적으로 스냅샷을 떠서 최소한 복구는 가능하게 한다. 아래 "알려진 이슈"에 나오듯 etcd 컨테이너 이미지가 최소 구성이라 `kubectl cp`를 못 쓰고, hostPath 볼륨을 통해 호스트에서 직접 꺼낸다.
+- 스크립트: [`07-etcd-backup.sh`](../scripts/02-k8s-cluster/07-etcd-backup.sh)
+```bash
+# etcd 파드 안에서 스냅샷 생성 (hostPath 볼륨 /var/lib/etcd에 바로 씀)
+kubectl -n kube-system exec etcd-chan08 -- etcdctl snapshot save /var/lib/etcd/etcd-backup-tmp.db \
+  --endpoints=https://127.0.0.1:2379 \
+  --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+  --cert=/etc/kubernetes/pki/etcd/healthcheck-client.crt \
+  --key=/etc/kubernetes/pki/etcd/healthcheck-client.key
+
+# 스냅샷 무결성 확인
+kubectl -n kube-system exec etcd-chan08 -- etcdutl snapshot status /var/lib/etcd/etcd-backup-tmp.db --write-out=table
+
+# hostPath라 파드 안 경로와 호스트 경로가 같은 파일 - 호스트 쪽에서 바로 이동
+sudo mv /var/lib/etcd/etcd-backup-tmp.db /data/etcd-backup/etcd-snapshot-<타임스탬프>.db
+```
+매일 새벽 자동 실행되도록 chan08의 crontab에 등록해뒀다 (KST 03:00, 최근 7개 보관, 로그는 스크립트와 같은 디렉토리):
+```bash
+0 3 * * * /home/chan/k8s-cluster/07-etcd-backup.sh >> /home/chan/k8s-cluster/etcd-backup.log 2>&1
+```
+
 ## 알려진 이슈: UFW가 pod 네트워크를 막음
 
 [`04-firewall.sh`](../scripts/01-provision/04-firewall.sh)로 UFW를 활성화하면 `/etc/default/ufw`의 `DEFAULT_FORWARD_POLICY`가 기본 `DROP`으로 설정된다. 이 상태에서는 iptables `FORWARD` 체인 기본 정책이 DROP이 되어, kube-proxy/Flannel이 만든 규칙에 명시적으로 걸리지 않는 pod→ClusterIP 트래픽이 막힌다. 실제로 CoreDNS가 `[WARNING] plugin/kubernetes: starting server with unsynced Kubernetes API` 상태에서 멈추는 증상으로 나타났다.
 
 `06-fix-ufw-forward.sh`가 `DEFAULT_FORWARD_POLICY`를 `ACCEPT`로 바꾸고 `ufw reload`한다. **인바운드 규칙(10.5.5.0/24 제한)에는 영향 없음** — FORWARD 체인(라우팅되는 트래픽)만 대상. 앞으로 이 서버들에 UFW를 다시 초기화하는 경우 이 스크립트를 반드시 함께 적용해야 한다.
+
+## 알려진 이슈: etcd 컨테이너 이미지엔 tar/cat/rm도 없음
+
+etcd 스냅샷을 파드 밖으로 꺼내려고 `kubectl cp`를 쓰면 `tar: executable file not found`로 실패한다. etcd 공식 이미지가 etcdctl/etcdutl 정도만 들어있는 최소 구성이라 tar는 물론 cat, rm, which도 없다. `kubectl exec ... -- cat file > local` 같은 우회도 마찬가지로 안 된다.
+
+해결: etcd 정적 파드의 매니페스트(`/etc/kubernetes/manifests/etcd.yaml`)를 보면 `/var/lib/etcd`가 hostPath 볼륨으로 그대로 마운트돼 있다. 스냅샷을 이 경로 밑에 저장하면 파드 안에서 쓴 파일이 호스트의 같은 경로에 그대로 나타나므로, `kubectl exec`로 파일을 꺼낼 필요 없이 호스트에서 바로 `sudo mv`/`sudo cp`하면 된다.
+
+또한 `etcdctl`에는 3.6부터 `snapshot status`가 없다 — 스냅샷 무결성 확인은 오프라인 전용 도구인 `etcdutl`로 해야 한다(둘 다 이미지 안에 들어있음).
 
 ## 검증
 
