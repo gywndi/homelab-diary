@@ -12,10 +12,11 @@ kubectl get nodes -o wide
 ```
 ```
 NAME     STATUS   ROLES           AGE   VERSION   INTERNAL-IP
-chan08   Ready    control-plane   38h   v1.36.4   10.5.5.8
-chan09   Ready    <none>          38h   v1.36.4   10.5.5.9
+chan08   Ready    control-plane   2d8h  v1.36.4   10.5.5.8
+chan09   Ready    control-plane   2d8h  v1.36.4   10.5.5.9
+llm001   Ready    control-plane   8h    v1.36.4   10.5.5.10
 ```
-chan08만 `control-plane` 롤을 달고 있고, 이 롤에 대응하는 taint가 아래 모든 배치 이유의 출발점이다.
+세 노드 다 `control-plane` 롤을 달고 있다. 물리 노드가 정확히 3대뿐이라 "컨트롤플레인 전용 노드"를 따로 뺄 여유가 없어서, 전부 컨트롤플레인 겸 워커로 쓰는 구성이다(kubeadm의 stacked etcd 토폴로지). llm001에는 `nvidia.com/gpu=true` 라벨이 추가로 붙어있다 — GPU를 가진 노드라는 표시.
 
 **nginx/인증서(Stage 5) 작업 전, 완전 깡통 상태의 기본 데몬**은 아래 항목 중 1~2번뿐이었다 — `kubeadm init` + Flannel(CNI) 설치만으로 나오는 최소 구성:
 - kube-system: etcd, kube-apiserver, kube-controller-manager, kube-scheduler (정적 파드)
@@ -23,26 +24,56 @@ chan08만 `control-plane` 롤을 달고 있고, 이 롤에 대응하는 taint가
 - kube-system: coredns (Deployment)
 - kube-flannel: kube-flannel-ds (DaemonSet) — CNI는 kubeadm이 자동으로 깔아주지 않고 따로 설치해야 하지만, 파드 네트워크가 동작하려면 반드시 있어야 해서 사실상 베이스라인에 포함된다.
 
-3번(metallb-system), 4번의 ingress-nginx, 5번(cert-manager, cm-acme-http-solver)은 전부 Stage 5에서 우리가 나중에 얹은 것들이다.
+3번(metallb-system), 4번의 ingress-nginx, 5번(cert-manager, cm-acme-http-solver)은 Stage 5에서, 6번(nvidia-device-plugin)은 Stage 6(GPU 노드 추가, [`06-llm-gpu-node.md`](../lessons/06-llm-gpu-node.md))에서 나중에 얹은 것들이다.
 
-### 1. 정적 파드 — etcd, kube-apiserver, kube-controller-manager, kube-scheduler (chan08 전용)
+### 1. 정적 파드 — etcd, kube-apiserver, kube-controller-manager, kube-scheduler (3대 전부)
 ```bash
 kubectl -n kube-system get pods -l tier=control-plane -o wide
 ```
 ```
 NAME                             READY   STATUS    NODE
 etcd-chan08                      1/1     Running   chan08
+etcd-chan09                      1/1     Running   chan09
+etcd-llm001                      1/1     Running   llm001
 kube-apiserver-chan08            1/1     Running   chan08
+kube-apiserver-chan09            1/1     Running   chan09
+kube-apiserver-llm001            1/1     Running   llm001
 kube-controller-manager-chan08   1/1     Running   chan08
+kube-controller-manager-chan09   1/1     Running   chan09
+kube-controller-manager-llm001   1/1     Running   llm001
 kube-scheduler-chan08            1/1     Running   chan08
+kube-scheduler-chan09            1/1     Running   chan09
+kube-scheduler-llm001            1/1     Running   llm001
 ```
 - 역할: 클러스터의 두뇌. etcd는 상태 저장소, kube-apiserver는 모든 요청이 거치는 관문, controller-manager/scheduler는 각각 리소스 상태 맞추기와 파드 배치를 담당한다.
-- 왜 chan08에만: 스케줄러가 배치한 일반 파드가 아니라 "정적 파드"다. kubelet이 `/etc/kubernetes/manifests/`에 있는 파일을 그 노드에서만 직접 읽어서 띄우는 방식이라, `kubeadm init`을 실행한 chan08에만 이 파일들이 있다.
-- 관련 설정: `hostNetwork: true`라서 파드 전용 IP(10.244.x) 없이 노드 IP(10.5.5.8)를 그대로 쓴다.
-- **컨트롤플레인이 chan08 하나뿐이라 진짜 장애 지점(SPOF)이다.** etcd가 chan08에만 있어서 chan08이 죽으면 클러스터 상태 전체를 잃을 위험이 있고, API 서버가 없으니 kubectl도, 새 파드 스케줄링도, 이미 떠 있는 파드의 재시작 판단도 전부 멈춘다(떠 있던 파드 자체는 당분간 계속 돈다).
-- **노드를 1대만 추가해서는 안 고쳐진다.** etcd는 과반수(quorum) 투표로 동작해서 절대 짝수로 두면 안 된다 — 컨트롤플레인 2대면 하나가 죽었을 때 남은 1대가 "과반"이 안 돼서(2대 중 1대는 정확히 절반이지 과반이 아님) 여전히 아무것도 못 하고, 오히려 네트워크가 잠깐 끊기기만 해도 스플릿 브레인 위험만 늘어난다. 진짜 고치려면 컨트롤플레인을 3대(홀수)로 만들어야 한다. 저전력 노드라도 상관없다 — etcd는 CPU/메모리보다 디스크 쓰기 지연에 민감하니 SSD/NVMe급 저장장치면 충분하고, 느린 SD카드 같은 건 피하는 게 좋다.
+- 왜 3대 전부: 스케줄러가 배치한 일반 파드가 아니라 "정적 파드"다. kubelet이 `/etc/kubernetes/manifests/`에 있는 파일을 그 노드에서만 직접 읽어서 띄우는 방식이라, 컨트롤플레인으로 join된 노드마다 각자 이 파일들을 갖고 있다. 처음엔 chan08 하나뿐이었다가, chan09/llm001을 `kubeadm join --control-plane`으로 추가해서 지금은 3대 모두에 있다.
+- 관련 설정: `hostNetwork: true`라서 파드 전용 IP(10.244.x) 없이 노드 IP를 그대로 쓴다.
 
-### 2. DaemonSet — kube-flannel, kube-proxy, metallb-system/speaker (전부 양쪽 노드에 하나씩)
+### 컨트롤플레인 HA — etcd 쿼럼과 API 서버 VIP
+```bash
+kubectl -n kube-system exec etcd-chan08 -- etcdctl member list \
+  --endpoints=https://127.0.0.1:2379 \
+  --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+  --cert=/etc/kubernetes/pki/etcd/healthcheck-client.crt \
+  --key=/etc/kubernetes/pki/etcd/healthcheck-client.key \
+  --write-out=table
+```
+```
++------------------+---------+--------+------------------------+------------------------+
+|        ID        | STATUS  |  NAME  |       PEER ADDRS       |      CLIENT ADDRS      |
++------------------+---------+--------+------------------------+------------------------+
+| 5ad480bb8fe14802 | started | chan09 |  https://10.5.5.9:2380 |  https://10.5.5.9:2379 |
+| 674ecf81a092285e | started | chan08 |  https://10.5.5.8:2380 |  https://10.5.5.8:2379 |
+| f505e1368929ce05 | started | llm001 | https://10.5.5.10:2380 | https://10.5.5.10:2379 |
++------------------+---------+--------+------------------------+------------------------+
+```
+- **처음엔 chan08 하나뿐이라 진짜 장애 지점(SPOF)이었다.** etcd가 chan08에만 있어서 chan08이 죽으면 클러스터 상태 전체를 잃을 위험이 있었고, API 서버가 없으니 kubectl도, 새 파드 스케줄링도, 이미 떠 있는 파드의 재시작 판단도 전부 멈추는 상태였다(떠 있던 파드 자체는 당분간 계속 돔).
+- **노드를 1대만 추가해서는 안 고쳐진다.** etcd는 과반수(quorum) 투표로 동작해서 절대 짝수로 두면 안 된다 — 컨트롤플레인 2대면 하나가 죽었을 때 남은 1대가 "과반"이 안 돼서(2대 중 1대는 정확히 절반이지 과반이 아님) 여전히 아무것도 못 하고, 오히려 네트워크가 잠깐 끊기기만 해도 스플릿 브레인 위험만 늘어난다.
+- **물리 노드가 3대가 되면서 실제로 고쳤다.** chan09, llm001을 순서대로 `kubeadm join --control-plane`으로 합류시켜서 etcd 멤버 3개(홀수)를 만들었다 — 이제 아무 노드 1대가 죽어도 나머지 2대가 과반이라 클러스터가 계속 동작한다.
+- **API 서버 접속용 VIP도 별도로 필요하다.** etcd/apiserver가 3대에 분산돼도, kubectl이나 각 노드의 kubelet이 여전히 chan08 IP 하나만 보고 있으면 chan08이 죽었을 때 여전히 접속할 곳이 없다. keepalived로 VIP(10.5.5.3)를 3대가 우선순위 기반으로 나눠 갖게 하고, `admin.conf`(kubectl 설정)가 이 VIP를 보게 만들었다 — VIP를 든 노드는 자기 자신의 apiserver가 그대로 응답하므로 별도 로드밸런서가 없어도 된다.
+- **kubelet/controller-manager/scheduler의 kubeconfig는 VIP가 아니라 각자 자기 자신의 IP를 본다** — kubeadm이 컨트롤플레인 노드마다 그렇게 자동 생성해준다. 로컬 apiserver가 제일 빠르고, 그 노드가 살아있으면 로컬 apiserver도 살아있다고 보기 때문에 의도된 동작이다. 자세한 절차는 [`06-llm-gpu-node.md`](../lessons/06-llm-gpu-node.md) 참고.
+
+### 2. DaemonSet — kube-flannel, kube-proxy, metallb-system/speaker (전부 노드마다 하나씩)
 ```bash
 kubectl -n kube-flannel get pods -o wide
 ```
@@ -50,6 +81,7 @@ kubectl -n kube-flannel get pods -o wide
 NAME                    READY   STATUS    NODE
 kube-flannel-ds-xrv7b   1/1     Running   chan08
 kube-flannel-ds-z97ts   1/1     Running   chan09
+kube-flannel-ds-cl2bw   1/1     Running   llm001
 ```
 ```bash
 kubectl -n kube-system get pods -l k8s-app=kube-proxy -o wide
@@ -58,6 +90,7 @@ kubectl -n kube-system get pods -l k8s-app=kube-proxy -o wide
 NAME               READY   STATUS    NODE
 kube-proxy-55bwl   1/1     Running   chan09
 kube-proxy-924dx   1/1     Running   chan08
+kube-proxy-wszxn   1/1     Running   llm001
 ```
 ```bash
 kubectl -n metallb-system get pods -l component=speaker -o wide
@@ -66,39 +99,52 @@ kubectl -n metallb-system get pods -l component=speaker -o wide
 NAME            READY   STATUS    NODE
 speaker-8s7z7   1/1     Running   chan09
 speaker-tww5r   1/1     Running   chan08
+speaker-vxgk8   1/1     Running   llm001
 ```
-- 대분류가 같다: DaemonSet은 "노드가 몇 개든 그 수만큼" 뜨는 게 기본 동작이라 셋 다 원칙적으로 모든 노드에 하나씩 있다.
+- 대분류가 같다: DaemonSet은 "노드가 몇 개든 그 수만큼" 뜨는 게 기본 동작이라 셋 다 원칙적으로 모든 노드에 하나씩 있다. 노드가 2대에서 3대(llm001 추가)로 늘어나자 별다른 설정 변경 없이 자동으로 세 번째 파드가 llm001에도 생겼다.
 - 각자 역할: flannel은 파드 네트워크(오버레이) 제공, kube-proxy는 Service 라우팅 규칙(iptables)을 그 노드에 실제로 심어주는 주체, speaker는 VIP에 대한 ARP 응답과 리더 선출.
-- control-plane taint를 무시하는 방식은 서로 다르다 — flannel은 toleration이 `{"effect":"NoSchedule","operator":"Exists"}`로, key를 지정 안 한 와일드카드라 "NoSchedule 계열이면 뭐든 다 참는다." speaker는 MetalLB 매니페스트에 control-plane/master taint를 콕 집어 참는 toleration이 박혀있다. kube-proxy는 kubeadm이 애초에 이 taint를 참도록 만들어서 배포한다.
+- 지금은 노드에 taint가 하나도 없어서(아래 "스케줄링 제어" 참고) 이 셋 다 toleration 유무와 무관하게 뜬다. 예전엔 control-plane taint가 있는 노드에도 뜨도록 각자 다른 방식으로 toleration을 갖고 있었다 — flannel은 `{"effect":"NoSchedule","operator":"Exists"}`(key 없는 와일드카드), speaker는 control-plane/master taint를 콕 집어 참는 toleration, kube-proxy는 kubeadm이 애초에 그렇게 배포. taint가 사라진 지금도 이 toleration들은 그대로 남아있는데(무해함), 나중에 다시 taint가 생겨도 자동으로 버틴다.
 - speaker만 `hostNetwork: true`가 추가로 붙는다 — VIP의 ARP 응답은 파드 네트워크가 아니라 노드의 실제 네트워크 인터페이스에서 처리해야 하기 때문.
 
-### 3. Deployment, toleration 없음 — metallb-system/controller, cert-manager 3종 (전부 chan09)
+### 2-1. GPU 전용 DaemonSet — nvidia-device-plugin (llm001에만, nodeSelector로 제한)
+```bash
+kubectl -n kube-system get pods -l name=nvidia-device-plugin-ds -o wide
+```
+```
+NAME                                   READY   STATUS    NODE
+nvidia-device-plugin-daemonset-6plgc   1/1     Running   llm001
+```
+- 위 셋과 같은 DaemonSet이지만 `nodeSelector: nvidia.com/gpu: "true"`가 걸려있어서 그 라벨이 붙은 노드(llm001)에만 뜬다 — "모든 노드에 하나씩"이 기본값인 DaemonSet도 nodeSelector로 범위를 좁힐 수 있다.
+- 역할: 노드가 가진 GPU를 `nvidia.com/gpu`라는 이름의 스케줄링 가능한 리소스로 kube-apiserver에 등록해준다. 이게 있어야 파드가 `resources.limits: {nvidia.com/gpu: 1}`로 GPU를 요청할 수 있다.
+- GPU 전용 taint는 걸지 않았다 — `nvidia.com/gpu` 리소스를 실제로 가진 노드가 llm001뿐이라서, GPU를 요청하는 파드는 taint 없이도 스케줄러가 자동으로 거기로만 보낸다. taint를 걸면 오히려 llm001에 일반 워크로드가 못 올라가는 손해만 있어서 뺐다.
+
+### 3. Deployment, toleration 없음 — metallb-system/controller, cert-manager 3종 (지금은 chan09에 있음)
 ```bash
 kubectl -n metallb-system get pods -l component=controller -o wide
 ```
 ```
 NAME                         READY   STATUS    NODE
-controller-658745d67-49z4m   1/1     Running   chan09
+controller-658745d67-cnnhr   1/1     Running   chan09
 ```
 ```bash
 kubectl -n cert-manager get pods -o wide
 ```
 ```
 NAME                                       READY   STATUS    NODE
-cert-manager-69c7fcbf78-hmn2x              1/1     Running   chan09
-cert-manager-cainjector-69f8c8cdbf-tsshv   1/1     Running   chan09
-cert-manager-webhook-84fd89df64-tf67f      1/1     Running   chan09
+cert-manager-69c7fcbf78-qdvfl              1/1     Running   chan09
+cert-manager-cainjector-69f8c8cdbf-qtrc9   1/1     Running   chan09
+cert-manager-webhook-84fd89df64-frkch      1/1     Running   chan09
 ```
 - 역할: controller는 어느 노드가 VIP를 받을지 조정하는 두뇌(실제 트래픽 처리는 speaker가 함), cert-manager 3종은 인증서 발급/갱신 처리.
-- 왜 chan09에만: 이 파드들엔 toleration이 아예 없다. control-plane taint가 있는 chan08엔 원천적으로 못 뜨고, 남은 노드가 chan09 하나뿐이라 자동으로 그리로 간다. 실제 트래픽 경로에 있는 게 아니라 지금은 이대로 둬도 무방.
+- 왜 지금 chan09에: 이 파드들엔 toleration이 아예 없다. **예전엔** control-plane taint가 있는 chan08엔 못 뜨고 워커인 chan09만 후보라 자동으로 거기로 갔던 것인데, 지금은 3대 다 taint가 없어서 이 파드들도 chan08이나 llm001에 뜰 수 있다 — 다만 **k8s는 이미 떠서 잘 돌고 있는 파드를 taint 상황이 바뀌었다고 알아서 다른 노드로 옮기지 않는다.** 스케줄링은 파드가 "새로 생성되는 시점"에만 일어나기 때문에, 지금 chan09에 있는 건 예전에 그렇게 배치된 게 그대로 남아있는 것뿐이다. 파드를 지웠다 다시 만들면 그때는 3대 중 아무 데나 갈 수 있다.
 
-### 4. Deployment + anti-affinity로 노드 분산 — coredns, ingress-nginx-controller (전부 노드당 1개씩 강제)
+### 4. Deployment + anti-affinity로 노드 분산 — coredns, ingress-nginx-controller (노드당 1개씩 강제, replicas=2라 3대 중 2대에만)
 ```bash
 kubectl -n kube-system get pods -l k8s-app=kube-dns -o wide
 ```
 ```
 NAME                      READY   STATUS    NODE
-coredns-bbf8c64b6-fgn6d   1/1     Running   chan09
+coredns-bbf8c64b6-fvqtp   1/1     Running   chan09
 coredns-bbf8c64b6-st5qd   1/1     Running   chan08
 ```
 ```bash
@@ -106,10 +152,10 @@ kubectl -n ingress-nginx get pods -l app.kubernetes.io/component=controller -o w
 ```
 ```
 NAME                                       READY   STATUS    NODE
-ingress-nginx-controller-ccfdd7f8c-cldwc   1/1     Running   chan09
+ingress-nginx-controller-ccfdd7f8c-5wqth   1/1     Running   chan09
 ingress-nginx-controller-ccfdd7f8c-tqpmb   1/1     Running   chan08
 ```
-- 둘 다 control-plane taint를 참는 toleration이 있고, "같은 라벨의 파드는 서로 다른 노드에"를 `requiredDuringSchedulingIgnoredDuringExecution`(강제)로 걸어놔서 항상 노드당 1개씩 유지된다.
+- 둘 다 "같은 라벨의 파드는 서로 다른 노드에"를 `requiredDuringSchedulingIgnoredDuringExecution`(강제)로 걸어놔서 항상 노드당 1개씩 유지된다. `replicas: 2`라 지금은 3대 중 2대(chan08, chan09)에만 있고 llm001은 비어있다 — anti-affinity는 "같은 노드에 몰리지 마라"는 규칙이지 "모든 노드에 하나씩 채워라"가 아니라서, replicas를 3으로 올리지 않는 한 세 번째 노드는 그냥 후보에서 빠진다.
 - coredns는 원래 기본값이 `preferredDuringScheduling`(권장, 강제 아님)이라 처음엔 우연히 둘 다 chan09에 몰려있었다 — chan09가 죽으면 클러스터 DNS가 통째로 끊기는 상태였다. `kubectl patch`로 `required`로 바꾸고 파드 하나를 지워서 강제로 재배치시켜 해결했다 (Deployment의 파드 템플릿을 바꿔도 이미 떠 있는 파드는 스스로 안 움직이므로, 최소 하나는 삭제해서 다시 뜨게 해야 새 규칙이 적용된다).
 - ingress-nginx-controller는 [`05-ingress.md`](../lessons/05-ingress.md)에서 처음부터 `required`로 만들었다.
 
@@ -118,18 +164,18 @@ ingress-nginx-controller-ccfdd7f8c-tqpmb   1/1     Running   chan08
 kubectl get pods -A | grep acme-http-solver
 ```
 ```
-default   cm-acme-http-solver-gbd9l   1/1   Running   0   64m
-default   cm-acme-http-solver-vjltg   1/1   Running   0   64m
+default   cm-acme-http-solver-bprjq   1/1   Running   0   7h49m
+default   cm-acme-http-solver-n8q7x   1/1   Running   0   7h49m
 ```
 - 역할: cert-manager가 인증서 발급 순간에만 잠깐 만드는 ACME HTTP-01 챌린지 응답용 파드. 발급이 끝나면 자동으로 사라진다.
 
 ## 기본 단위
 
 ### 클러스터 / 노드
-클러스터는 여러 대의 서버를 묶어서 하나처럼 쓰는 단위다. 그 서버 한 대 한 대를 노드라고 부른다. 우리는 chan08(컨트롤플레인)과 chan09(워커) 2대로 클러스터 하나를 만들었다.
+클러스터는 여러 대의 서버를 묶어서 하나처럼 쓰는 단위다. 그 서버 한 대 한 대를 노드라고 부른다. 처음엔 chan08(컨트롤플레인) + chan09(워커) 2대였고, 지금은 GPU 머신(llm001)까지 합류해서 3대 다 컨트롤플레인 겸 워커로 구성돼 있다.
 
 - **컨트롤플레인**: 클러스터 전체를 관리하는 두뇌 역할. API 서버(kubectl이 말 거는 대상), 스케줄러(어느 노드에 뭘 띄울지 결정), etcd(클러스터 상태 저장소) 같은 게 여기서 돈다.
-- **워커**: 실제 애플리케이션(파드)이 도는 노드. 컨트롤플레인도 기본적으로 워커 역할을 겸할 수 있는데, 기본값은 "컨트롤플레인엔 일반 파드를 안 올린다"는 정책(Taint)이 걸려있다.
+- **워커**: 실제 애플리케이션(파드)이 도는 노드. 컨트롤플레인도 기본적으로 워커 역할을 겸할 수 있는데, kubeadm 기본값은 "컨트롤플레인엔 일반 파드를 안 올린다"는 정책(Taint)을 걸어둔다 — 우리는 노드가 3대뿐이라 이 taint를 셋 다 없애고 완전히 대칭으로 쓴다 (아래 "스케줄링 제어" 참고).
 
 ### 파드(Pod)
 Kubernetes가 다루는 가장 작은 배포 단위. 컨테이너 하나(또는 몇 개)를 감싼 것이라고 보면 된다. 파드는 언제든 죽었다 다시 만들어질 수 있고, 그때마다 IP가 바뀐다 — 그래서 파드 IP를 직접 기억해서 접속하면 안 되고, 아래 Service를 거쳐야 한다.
@@ -177,7 +223,11 @@ Service가 "하나의 고정 주소"라면, Ingress는 그 앞에서 "어떤 도
 ## 스케줄링 제어
 
 ### Taint / Toleration — "이 노드엔 함부로 못 올라옴"
-Taint는 노드에 붙이는 "거부 딱지"다. 컨트롤플레인 노드엔 기본적으로 `node-role.kubernetes.io/control-plane:NoSchedule` Taint가 붙어있어서, 일반 파드는 이 노드에 못 뜬다. 그 파드가 "나는 이 딱지 무시하고 뜰 수 있어"라고 선언하는 게 Toleration이다. ingress-nginx를 chan08(컨트롤플레인)에도 띄우려고 Toleration을 추가했다.
+Taint는 노드에 붙이는 "거부 딱지"다. `키=값:효과` 형태이고, 파드가 "나는 이 딱지 무시하고 뜰 수 있어"라고 선언하는 게 Toleration이다. 효과는 세 가지: `NoSchedule`(새 배치만 막음), `PreferNoSchedule`(가능하면 피함, 강제 아님), `NoExecute`(새 배치도 막고 이미 떠 있는 파드도 쫓아냄).
+
+**taint/toleration은 "막기"만 하지 "끌어오기"는 못 한다.** toleration이 있다고 그 노드로 가는 게 아니라, 그냥 "거기도 갈 수 있는 후보"가 될 뿐이다. 특정 노드에 반드시 고정하려면 별도로 nodeSelector/nodeAffinity를 같이 써야 한다 — nvidia-device-plugin이 `nodeSelector: nvidia.com/gpu: "true"`로 GPU 노드에 고정되는 게 그 예.
+
+kubeadm은 컨트롤플레인 노드에 기본적으로 `node-role.kubernetes.io/control-plane:NoSchedule` taint를 건다(일반 파드가 못 올라오게). 우리도 처음엔 이걸 그대로 뒀다가, GPU 노드(llm001)에도 `nvidia.com/gpu=present:NoSchedule` taint를 걸어봤는데 — 노드가 3대뿐인 상황에서 컨트롤플레인 taint가 3대 전부에 붙어버리자 toleration 없는 일반 워크로드(cert-manager 등)가 클러스터 어디에도 못 뜨는 문제가 생겼다. 게다가 GPU taint는 애초에 불필요했다 — GPU 요청 파드는 `nvidia.com/gpu` 리소스를 가진 노드가 거기뿐이라 taint 없이도 자동으로 거기로만 갔기 때문. 결국 지금은 3대 다 taint를 없애고 완전 대칭으로 운영한다(자세한 경위는 [`06-llm-gpu-node.md`](../lessons/06-llm-gpu-node.md) 참고).
 
 ### Affinity / Anti-affinity — "같이 뜨게" 또는 "따로 뜨게"
 파드를 어디에 스케줄할지에 대한 세밀한 규칙. Anti-affinity로 "같은 라벨을 가진 파드는 서로 다른 노드에 하나씩만" 강제해서, ingress-nginx 파드 2개가 각각 다른 노드에 뜨도록 만들었다(둘 다 chan09에 몰리는 걸 방지).
