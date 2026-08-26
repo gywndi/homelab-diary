@@ -2,6 +2,63 @@
 
 Kubernetes를 처음부터 배우면서 이 클러스터를 만들었다. 새 컴포넌트를 추가할 때마다 그때 필요했던 개념을 여기에 추가한다 — 교과서적 정의보다 "우리 클러스터에서 실제로 이게 왜 필요했는지"를 우선한다.
 
+## 현재 클러스터 현황
+
+2026-08-26 기준 실제 상태. 아래 개념 설명에서 나오는 것들이 실제로 클러스터에 어떻게 떠 있는지 대조해서 보면 된다. 도메인/Ingress 이름은 실제 값 대신 `app1.example.com` 식으로 치환했다.
+
+```
+=== 노드 ===
+NAME     STATUS   ROLES           AGE   VERSION   INTERNAL-IP
+chan08   Ready    control-plane   38h   v1.36.4   10.5.5.8
+chan09   Ready    <none>          38h   v1.36.4   10.5.5.9
+
+=== 네임스페이스별 파드 ===
+NAMESPACE        NAME                                       READY   STATUS    NODE
+cert-manager     cert-manager-69c7fcbf78-hmn2x              1/1     Running   chan09
+cert-manager     cert-manager-cainjector-69f8c8cdbf-tsshv   1/1     Running   chan09
+cert-manager     cert-manager-webhook-84fd89df64-tf67f      1/1     Running   chan09
+ingress-nginx    ingress-nginx-controller-ccfdd7f8c-cldwc   1/1     Running   chan09
+ingress-nginx    ingress-nginx-controller-ccfdd7f8c-tqpmb   1/1     Running   chan08
+kube-flannel     kube-flannel-ds-xrv7b                      1/1     Running   chan08
+kube-flannel     kube-flannel-ds-z97ts                      1/1     Running   chan09
+kube-system      coredns-589f44dc88-2gsg4                   1/1     Running   chan09
+kube-system      coredns-589f44dc88-q49tq                   1/1     Running   chan09
+kube-system      etcd-chan08                                1/1     Running   chan08
+kube-system      kube-apiserver-chan08                      1/1     Running   chan08
+kube-system      kube-controller-manager-chan08              1/1     Running   chan08
+kube-system      kube-proxy-55bwl                            1/1     Running   chan09
+kube-system      kube-proxy-924dx                            1/1     Running   chan08
+kube-system      kube-scheduler-chan08                       1/1     Running   chan08
+metallb-system   controller-658745d67-49z4m                  1/1     Running   chan09
+metallb-system   speaker-8s7z7                                1/1     Running   chan09
+metallb-system   speaker-tww5r                                1/1     Running   chan08
+
+=== 서비스 (일부) ===
+NAMESPACE        NAME                        TYPE           CLUSTER-IP    EXTERNAL-IP   PORT(S)
+ingress-nginx    ingress-nginx-controller    LoadBalancer   10.96.95.194  10.5.5.2      80:31421/TCP,443:30615/TCP
+kube-system      kube-dns                    ClusterIP      10.96.0.10    <none>        53/UDP,53/TCP,9153/TCP
+default          ext-app1-example-com        ClusterIP      10.104.34.159 <none>        4200/TCP
+default          ext-app2-example-com        ClusterIP      10.107.17.142 <none>        4200/TCP
+default          ext-app3-example-com        ClusterIP      10.99.85.239  <none>        80/TCP
+default          ext-app4-example-com        ClusterIP      10.109.212.113 <none>       13000/TCP
+
+=== Ingress ===
+NAMESPACE   NAME                CLASS   HOSTS               ADDRESS             PORTS
+default     app1-example-com    nginx   app1.example.com    10.5.5.8,10.5.5.9   80, 443
+default     app2-example-com    nginx   app2.example.com    10.5.5.8,10.5.5.9   80, 443
+default     app3-example-com    nginx   app3.example.com    10.5.5.8,10.5.5.9   80, 443
+default     app4-example-com    nginx   app4.example.com    10.5.5.8,10.5.5.9   80, 443
+
+=== 인증서 ===
+NAMESPACE   NAME                    READY   SECRET
+default     app1-example-com-tls    False   app1-example-com-tls
+default     app2-example-com-tls    False   app2-example-com-tls
+default     app3-example-com-tls    True    app3-example-com-tls
+default     app4-example-com-tls    True    app4-example-com-tls
+```
+
+이 표를 보면 위에서 설명한 개념들이 바로 대응된다: `kube-system`의 `coredns-*`가 CoreDNS, `kube-proxy-*`가 kube-proxy, `metallb-system`의 `speaker-*`가 각 노드에 하나씩(DaemonSet), `ingress-nginx-controller-*`가 두 노드에 하나씩(Deployment + anti-affinity), `ext-app*-example-com`이 클러스터 밖 백엔드를 가리키는 Service다.
+
 ## 기본 단위
 
 ### 클러스터 / 노드
