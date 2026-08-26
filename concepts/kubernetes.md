@@ -71,7 +71,8 @@ kubectl -n kube-system exec etcd-chan08 -- etcdctl member list \
 - **노드를 1대만 추가해서는 안 고쳐진다.** etcd는 과반수(quorum) 투표로 동작해서 절대 짝수로 두면 안 된다 — 컨트롤플레인 2대면 하나가 죽었을 때 남은 1대가 "과반"이 안 돼서(2대 중 1대는 정확히 절반이지 과반이 아님) 여전히 아무것도 못 하고, 오히려 네트워크가 잠깐 끊기기만 해도 스플릿 브레인 위험만 늘어난다.
 - **물리 노드가 3대가 되면서 실제로 고쳤다.** chan09, llm001을 순서대로 `kubeadm join --control-plane`으로 합류시켜서 etcd 멤버 3개(홀수)를 만들었다 — 이제 아무 노드 1대가 죽어도 나머지 2대가 과반이라 클러스터가 계속 동작한다.
 - **API 서버 접속용 VIP도 별도로 필요하다.** etcd/apiserver가 3대에 분산돼도, kubectl이나 각 노드의 kubelet이 여전히 chan08 IP 하나만 보고 있으면 chan08이 죽었을 때 여전히 접속할 곳이 없다. keepalived로 VIP(10.5.5.3)를 3대가 우선순위 기반으로 나눠 갖게 하고, `admin.conf`(kubectl 설정)가 이 VIP를 보게 만들었다 — VIP를 든 노드는 자기 자신의 apiserver가 그대로 응답하므로 별도 로드밸런서가 없어도 된다.
-- **kubelet/controller-manager/scheduler의 kubeconfig는 VIP가 아니라 각자 자기 자신의 IP를 본다** — kubeadm이 컨트롤플레인 노드마다 그렇게 자동 생성해준다. 로컬 apiserver가 제일 빠르고, 그 노드가 살아있으면 로컬 apiserver도 살아있다고 보기 때문에 의도된 동작이다. 자세한 절차는 [`06-llm-gpu-node.md`](../lessons/06-llm-gpu-node.md) 참고.
+- **kubelet/controller-manager/scheduler의 kubeconfig는 VIP가 아니라 각자 자기 자신의 IP를 본다** — kubeadm이 컨트롤플레인 노드마다 그렇게 자동 생성해준다. 로컬 apiserver가 제일 빠르고, 그 노드가 살아있으면 로컬 apiserver도 살아있다고 보기 때문에 의도된 동작이다. 그래서 이 공유 진입점은 사실상 `admin.conf`(사람이 쓰는 kubectl 접속)용으로만 쓰인다. 자세한 절차는 [`06-llm-gpu-node.md`](../lessons/06-llm-gpu-node.md) 참고.
+- **왜 VIP(keepalived)고 DNS 라운드로빈/페일오버는 아닌지.** 도메인 하나에 여러 IP를 걸어두는 방식(멀티 데이터센터처럼 VRRP가 아예 안 되는 환경에서 흔히 씀)도 기능적으로는 가능하다. 하지만 DNS는 "누가 살아있는지" 자체를 모른다 — 죽은 IP로 접속을 실제로 시도해서 실패한 뒤에야 재시도하고, TTL을 아무리 낮춰도 헬스체크와 레코드 갱신을 능동적으로 해주는 별도 장치(Route53 헬스체크 같은) 없이는 그마저도 안 되며, 캐시 전파 시간만큼 항상 VIP보다 느리다. VRRP(keepalived)는 같은 서브넷(L2)에 있어야 한다는 제약이 있는 대신, 캐시 계층 없이 초 단위로 즉시 넘어간다. 우리는 3대가 전부 같은 서브넷(10.5.5.0/24)이라 VRRP 제약에 안 걸리므로 VIP 쪽을 택했다 — 노드가 서로 다른 네트워크(멀티 사이트)에 흩어지는 상황이 오면 그때는 DNS 기반 페일오버로 갈아타야 한다.
 
 ### 2. DaemonSet — kube-flannel, kube-proxy, metallb-system/speaker (전부 노드마다 하나씩)
 ```bash
