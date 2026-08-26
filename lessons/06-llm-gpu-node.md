@@ -9,10 +9,10 @@ GPU 리소스(`nvidia.com/gpu`)를 k8s가 직접 스케줄링 대상으로 관�
 ## 설계 결정
 
 - **드라이버는 완전 제거 후 재설치.** 기존 드라이버가 동작은 하고 있었지만 `ubuntu-drivers devices`가 추천하는 최신 브랜치가 아니었다. 부분 업그레이드보다 관련 패키지를 다 지우고 추천 버전을 새로 까는 쪽이 상태가 더 명확하다.
-- **containerd 기본 런타임을 nvidia로 직접 지정.** 이 노드는 GPU 전용으로 taint를 걸 것이므로 RuntimeClass로 일반/GPU 파드를 구분할 필요가 없다. 기본 런타임 자체를 nvidia로 바꾸는 게 더 단순하다.
-- **GPU taint + 와일드카드 toleration.** `nvidia.com/gpu` taint로 GPU 미요청 파드를 막는다. device-plugin 자체의 toleration은 특정 taint 하나만 지정하지 않고 `operator: Exists`(모든 taint 허용)로 뒀다 — 이 노드가 나중에 컨트롤플레인으로 승격되는 등 taint 구성이 바뀔 때마다 매번 toleration을 맞춰줄 필요 없게.
+- **containerd 기본 런타임을 nvidia로 직접 지정.** nvidia-container-runtime은 GPU를 요청하지 않는 일반 컨테이너에는 runc와 동일하게 동작하므로, 이 노드에 일반 파드가 같이 떠도 문제없다. RuntimeClass로 일반/GPU를 구분할 필요 없이 기본값 자체를 nvidia로 바꾸는 쪽이 더 단순하다.
+- **GPU 배타성은 taint가 아니라 리소스 요청으로 확보.** 처음엔 `nvidia.com/gpu` taint로 이 노드를 GPU 전용으로 막아뒀는데, 그러면 일반 워크로드가 이 노드를 아예 못 쓰게 되어 자원이 노는 문제가 있었다. 실제로는 `nvidia.com/gpu` 리소스를 실제로 가진 노드가 이 노드뿐이라, GPU를 요청하는 파드는 taint 없이도 스케줄러가 자동으로 여기로만 보낸다 — taint를 완전히 제거하고 라벨(`nvidia.com/gpu=true`, device-plugin의 nodeSelector용)만 남겼다. device-plugin의 toleration은 `operator: Exists`(모든 taint 허용)로 남겨뒀는데, 이 노드가 다시 컨트롤플레인 taint 같은 걸 받게 되더라도 매번 맞춰줄 필요 없게 하기 위함.
 - **컨트롤플레인 확장은 3대 전부를 스택 etcd로.** etcd는 과반수(quorum) 투표로 동작해서 짝수 대수는 오히려 손해다(2대는 1대 죽으면 과반 자체가 불가능해져서 1대짜리보다 나을 게 없음). 물리 노드가 정확히 3대뿐이라 "컨트롤플레인 전용 노드"를 따로 뺄 여유가 없어서, 3대 모두를 컨트롤플레인 겸 워커로 쓰는 kubeadm의 stacked etcd 토폴로지를 그대로 채택했다.
-- **컨트롤플레인 taint는 원래 있던 chan08에만 남김.** chan09/llm001까지 컨트롤플레인 taint가 붙으면 3대 전부가 "허가 없이는 못 들어오는" 노드가 되어버려서, toleration 없는 일반 워크로드(cert-manager, metallb-controller 등)가 클러스터 어디에도 못 뜨는 상태가 됐다. chan09/llm001의 컨트롤플레인 taint는 제거해서 기존처럼 일반 워크로드를 받게 하고, chan08만 원래 설계대로 보호 상태를 유지한다.
+- **컨트롤플레인 taint는 3대 전부 제거.** chan09/llm001까지 컨트롤플레인 taint가 붙으면 3대 전부가 "허가 없이는 못 들어오는" 노드가 되어버려서, toleration 없는 일반 워크로드(cert-manager, metallb-controller 등)가 클러스터 어디에도 못 뜨는 상태가 됐다. 처음엔 chan08만(원래 유일한 컨트롤플레인이었던 이력 + MySQL 소스를 겸하는 노드라는 이유로) taint를 남겨뒀으나, 3대가 이제 구조적으로 완전히 동일한 역할(컨트롤플레인+워커)이라 굳이 하나만 다르게 취급할 근거가 약해서 chan08의 taint도 마저 제거해 3대를 완전히 대칭으로 통일했다. llm001의 `nvidia.com/gpu` taint도 이후 제거했다 — GPU 배타성은 taint가 아니라 리소스 요청만으로 충분해서, taint를 남겨두는 건 일반 워크로드가 이 노드를 못 쓰게 막는 손해만 있었다 (위 설계 결정 참고). 결과적으로 3대 전부 taint가 없다.
 - **API 서버 VIP는 keepalived로, 기존 MySQL VIP와 같은 방식.** 별도 로드밸런서 없이 MetalLB(L2 ARP)와 원리가 다른, 호스트 native VRRP 방식을 그대로 재사용했다. VIP를 들고 있는 노드는 자기 자신의 apiserver(0.0.0.0:6443 바인딩)가 그대로 응답하므로 별도 프록시(haproxy 등)가 필요 없다 — 노드 하나가 죽으면 다음 우선순위 노드로 VIP가 넘어가고, 그 노드의 로컬 apiserver가 바로 이어받는다.
 - **VM으로 etcd를 옮기지 않음.** etcd 데이터 디렉터리는 이미 nvme(OS 루트)에 있고 MySQL/KVM 데이터는 별도 물리 디스크(`/data`)에 있어서, 디스크 I/O 경합은 애초에 거의 없다. VM 이전은 CPU/메모리 격리는 얻지만 디스크 격리는 별도 디스크를 새로 안 주는 한 얻는 게 없고, 브리지 네트워킹 구성부터 다시 해야 해서 비용 대비 실익이 낮다고 판단했다.
 
@@ -20,16 +20,17 @@ GPU 리소스(`nvidia.com/gpu`)를 k8s가 직접 스케줄링 대상으로 관�
 
 ```mermaid
 flowchart TB
-    subgraph C08["chan08 (컨트롤플레인, taint 유지)"]
+    subgraph C08["chan08 (컨트롤플레인, taint 없음)"]
         E08["etcd"]
         A08["apiserver"]
+        M8["MySQL(소스), KVM"]
     end
-    subgraph C09["chan09 (컨트롤플레인, taint 해제)"]
+    subgraph C09["chan09 (컨트롤플레인, taint 없음)"]
         E09["etcd"]
         A09["apiserver"]
-        M["MySQL, KVM 등 기존 워크로드"]
+        M["MySQL(레플리카), KVM"]
     end
-    subgraph C10["llm001 (컨트롤플레인, taint 해제 + GPU taint)"]
+    subgraph C10["llm001 (컨트롤플레인, taint 없음 + GPU)"]
         E10["etcd"]
         A10["apiserver"]
         GPU["RTX 5060 Ti<br/>nvidia-device-plugin"]
@@ -46,7 +47,7 @@ flowchart TB
     KUBECTL["kubectl / kubelet"] --> VIP
 ```
 
-**장점**: GPU를 `nvidia.com/gpu` 리소스로 선언하면 k8s 스케줄러가 알아서 GPU 있는 노드에만 파드를 배치해준다 — 배치 작업(Job)이든 상시 추론 서버(Deployment)든 다른 워크로드와 완전히 같은 방식(재시작 정책, 리소스 상한, 롤아웃)으로 관리된다. 나중에 GPU 노드가 늘어나도 라벨/taint만 똑같이 걸어주면 자동으로 스케줄링 대상에 포함된다.
+**장점**: GPU를 `nvidia.com/gpu` 리소스로 선언하면 k8s 스케줄러가 알아서 GPU 있는 노드에만 파드를 배치해준다 — 배치 작업(Job)이든 상시 추론 서버(Deployment)든 다른 워크로드와 완전히 같은 방식(재시작 정책, 리소스 상한, 롤아웃)으로 관리된다. 나중에 GPU 노드가 늘어나도 라벨만 똑같이 걸어주면 자동으로 스케줄링 대상에 포함된다 (GPU 배타성은 taint가 아니라 리소스 요청 자체로 확보되므로 taint는 불필요).
 
 **실사용 예**: `resources.limits: {nvidia.com/gpu: 1}`을 선언한 파드는 자동으로 llm001에만 배치된다 (`internal/gpu-node/gpu-test-pod.yaml` 참고 — 컨테이너 안에서 `nvidia-smi`로 GPU 인식 확인). 추론 서버를 Deployment로 올리면 컨테이너가 죽어도 k8s가 재시작해주고, 향후 서빙 스택(vLLM 등)을 Job/Deployment 매니페스트만 바꿔서 교체할 수 있다.
 
@@ -110,7 +111,7 @@ sudo apt-mark hold nvidia-driver-595-open
 설치 후 재부팅, `nvidia-smi`로 확인.
 
 ### containerd nvidia 런타임 설정
-- 설명: containerd의 기본 런타임을 nvidia로 지정한다 (이 노드는 GPU 전용이라 RuntimeClass 없이 바로 기본값으로).
+- 설명: containerd의 기본 런타임을 nvidia로 지정한다 (일반 컨테이너에는 runc와 동일하게 동작하므로 RuntimeClass 없이 바로 기본값으로 지정).
 - 스크립트: [`02-configure-nvidia-containerd-runtime.sh`](../scripts/06-llm-gpu-node/02-configure-nvidia-containerd-runtime.sh)
 ```bash
 sudo nvidia-ctk runtime configure --runtime=containerd --set-as-default
@@ -206,12 +207,11 @@ kubectl uncordon <새 노드>
 ```
 join 후 kubelet/controller-manager/scheduler의 kubeconfig는 kubeadm이 자동으로 **이 노드 자신의 IP**를 가리키게 생성한다 (VIP가 아님) — 로컬 apiserver가 가장 빠르고, 이 노드가 살아있으면 자기 자신의 apiserver도 살아있다고 보기 때문에 의도된 동작이다. `admin.conf`(사람이 kubectl 붙는 용도)만 VIP를 가리키도록 생성된다.
 
-### GPU 노드 라벨/taint
-- 설명: GPU를 요청하는 파드만 이 노드에 스케줄되도록 라벨과 taint를 건다.
-- 스크립트: [`06-label-and-taint-gpu-node.sh`](../scripts/06-llm-gpu-node/06-label-and-taint-gpu-node.sh)
+### GPU 노드 라벨
+- 설명: device-plugin의 `nodeSelector`가 찾을 수 있도록 라벨을 건다. (처음엔 taint도 같이 걸어 이 노드를 GPU 전용으로 막았으나, GPU 요청 파드는 리소스 제약만으로도 이 노드로만 스케줄되고 taint는 일반 워크로드를 못 쓰게 막는 손해만 있어서 이후 제거했다 — 위 설계 결정 참고)
+- 스크립트: [`06-label-gpu-node.sh`](../scripts/06-llm-gpu-node/06-label-gpu-node.sh)
 ```bash
 kubectl label node llm001 nvidia.com/gpu=true
-kubectl taint node llm001 nvidia.com/gpu=present:NoSchedule
 ```
 
 ### nvidia-device-plugin 설치
@@ -254,7 +254,7 @@ spec:
 `kubeadm reset` 후 CNI 정리 과정에서 `sudo iptables -F` 등으로 iptables를 직접 flush했더니 노드가 SSH/ping을 포함해 완전히 네트워크 단절됐다. UFW는 기본 정책을 DROP으로 걸어두고 그 위에 개별 ALLOW 규칙(SSH 등)을 얹는 방식인데, iptables를 직접 flush하면 ALLOW 규칙만 사라지고 DROP 기본 정책은 커널에 그대로 남는다. `/etc/ufw/`의 규칙 파일 자체는 디스크에 남아있어서 재부팅(또는 `sudo ufw reload`/`systemctl restart ufw`)하면 즉시 복구된다. **앞으로 UFW 쓰는 노드에서는 iptables를 직접 조작하지 말고 반드시 `ufw` 명령만 사용한다.**
 
 ### 컨트롤플레인 taint가 늘어나면 toleration 없는 워크로드가 전부 갈 곳을 잃음
-기존 워커(chan09)와 신규 노드(llm001)를 컨트롤플레인으로 승격시키면 kubeadm이 자동으로 `node-role.kubernetes.io/control-plane:NoSchedule` taint를 붙인다. 클러스터 노드 3대 전부에 이 taint가 붙으면, 이 taint에 대한 toleration이 없는 일반 워크로드(cert-manager, metallb-controller 등 — 원래는 taint 없는 워커에 떠 있었음)가 스케줄될 곳이 완전히 사라져 `Pending`으로 멈춘다. chan08 이외 노드의 컨트롤플레인 taint는 제거해서 해결했다 (위 설계 결정 참고).
+기존 워커(chan09)와 신규 노드(llm001)를 컨트롤플레인으로 승격시키면 kubeadm이 자동으로 `node-role.kubernetes.io/control-plane:NoSchedule` taint를 붙인다. 클러스터 노드 3대 전부에 이 taint가 붙으면, 이 taint에 대한 toleration이 없는 일반 워크로드(cert-manager, metallb-controller 등 — 원래는 taint 없는 워커에 떠 있었음)가 스케줄될 곳이 완전히 사라져 `Pending`으로 멈춘다. 3대 전부의 컨트롤플레인 taint를 제거해서 해결했다 (위 설계 결정 참고).
 
 ### kubeadm은 인증서 파일이 이미 있으면 재발급을 건너뜀
 `kubeadm init phase certs apiserver --config ...`를 그냥 실행하면 `[certs] Using existing apiserver certificate and key on disk`만 찍고 아무 것도 안 바꾼다. 새 SAN을 반영하려면 기존 `apiserver.crt`/`apiserver.key`를 먼저 지워야 강제로 재생성된다.
