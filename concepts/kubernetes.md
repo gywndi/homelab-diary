@@ -17,6 +17,14 @@ chan09   Ready    <none>          38h   v1.36.4   10.5.5.9
 ```
 chan08만 `control-plane` 롤을 달고 있고, 이 롤에 대응하는 taint가 아래 모든 배치 이유의 출발점이다.
 
+**nginx/인증서(Stage 5) 작업 전, 완전 깡통 상태의 기본 데몬**은 아래 항목 중 1~2번뿐이었다 — `kubeadm init` + Flannel(CNI) 설치만으로 나오는 최소 구성:
+- kube-system: etcd, kube-apiserver, kube-controller-manager, kube-scheduler (정적 파드)
+- kube-system: kube-proxy (DaemonSet)
+- kube-system: coredns (Deployment)
+- kube-flannel: kube-flannel-ds (DaemonSet) — CNI는 kubeadm이 자동으로 깔아주지 않고 따로 설치해야 하지만, 파드 네트워크가 동작하려면 반드시 있어야 해서 사실상 베이스라인에 포함된다.
+
+3번(metallb-system), 4번의 ingress-nginx, 5번(cert-manager, cm-acme-http-solver)은 전부 Stage 5에서 우리가 나중에 얹은 것들이다.
+
 ### 1. 정적 파드 — etcd, kube-apiserver, kube-controller-manager, kube-scheduler (chan08 전용)
 ```bash
 kubectl -n kube-system get pods -l tier=control-plane -o wide
@@ -31,6 +39,8 @@ kube-scheduler-chan08            1/1     Running   chan08
 - 역할: 클러스터의 두뇌. etcd는 상태 저장소, kube-apiserver는 모든 요청이 거치는 관문, controller-manager/scheduler는 각각 리소스 상태 맞추기와 파드 배치를 담당한다.
 - 왜 chan08에만: 스케줄러가 배치한 일반 파드가 아니라 "정적 파드"다. kubelet이 `/etc/kubernetes/manifests/`에 있는 파일을 그 노드에서만 직접 읽어서 띄우는 방식이라, `kubeadm init`을 실행한 chan08에만 이 파일들이 있다.
 - 관련 설정: `hostNetwork: true`라서 파드 전용 IP(10.244.x) 없이 노드 IP(10.5.5.8)를 그대로 쓴다.
+- **컨트롤플레인이 chan08 하나뿐이라 진짜 장애 지점(SPOF)이다.** etcd가 chan08에만 있어서 chan08이 죽으면 클러스터 상태 전체를 잃을 위험이 있고, API 서버가 없으니 kubectl도, 새 파드 스케줄링도, 이미 떠 있는 파드의 재시작 판단도 전부 멈춘다(떠 있던 파드 자체는 당분간 계속 돈다).
+- **노드를 1대만 추가해서는 안 고쳐진다.** etcd는 과반수(quorum) 투표로 동작해서 절대 짝수로 두면 안 된다 — 컨트롤플레인 2대면 하나가 죽었을 때 남은 1대가 "과반"이 안 돼서(2대 중 1대는 정확히 절반이지 과반이 아님) 여전히 아무것도 못 하고, 오히려 네트워크가 잠깐 끊기기만 해도 스플릿 브레인 위험만 늘어난다. 진짜 고치려면 컨트롤플레인을 3대(홀수)로 만들어야 한다. 저전력 노드라도 상관없다 — etcd는 CPU/메모리보다 디스크 쓰기 지연에 민감하니 SSD/NVMe급 저장장치면 충분하고, 느린 SD카드 같은 건 피하는 게 좋다.
 
 ### 2. DaemonSet — kube-flannel, kube-proxy, metallb-system/speaker (전부 양쪽 노드에 하나씩)
 ```bash
@@ -82,14 +92,14 @@ cert-manager-webhook-84fd89df64-tf67f      1/1     Running   chan09
 - 역할: controller는 어느 노드가 VIP를 받을지 조정하는 두뇌(실제 트래픽 처리는 speaker가 함), cert-manager 3종은 인증서 발급/갱신 처리.
 - 왜 chan09에만: 이 파드들엔 toleration이 아예 없다. control-plane taint가 있는 chan08엔 원천적으로 못 뜨고, 남은 노드가 chan09 하나뿐이라 자동으로 그리로 간다. 실제 트래픽 경로에 있는 게 아니라 지금은 이대로 둬도 무방.
 
-### 4. Deployment + anti-affinity로 노드 분산 시도 — coredns vs ingress-nginx-controller (같은 의도, 다른 결과)
+### 4. Deployment + anti-affinity로 노드 분산 — coredns, ingress-nginx-controller (전부 노드당 1개씩 강제)
 ```bash
 kubectl -n kube-system get pods -l k8s-app=kube-dns -o wide
 ```
 ```
-NAME                       READY   STATUS    NODE
-coredns-589f44dc88-2gsg4   1/1     Running   chan09
-coredns-589f44dc88-q49tq   1/1     Running   chan09
+NAME                      READY   STATUS    NODE
+coredns-bbf8c64b6-fgn6d   1/1     Running   chan09
+coredns-bbf8c64b6-st5qd   1/1     Running   chan08
 ```
 ```bash
 kubectl -n ingress-nginx get pods -l app.kubernetes.io/component=controller -o wide
@@ -99,9 +109,9 @@ NAME                                       READY   STATUS    NODE
 ingress-nginx-controller-ccfdd7f8c-cldwc   1/1     Running   chan09
 ingress-nginx-controller-ccfdd7f8c-tqpmb   1/1     Running   chan08
 ```
-- 대분류는 같다: 둘 다 "같은 라벨의 파드는 서로 다른 노드에 뜨면 좋겠다"는 anti-affinity가 걸려있고, 둘 다 control-plane taint를 참는 toleration도 있다. 그런데 강제 수준이 달라서 결과가 갈린다.
-- **coredns (replicas 2, 지금은 우연히 둘 다 chan09)**: `podAntiAffinity.preferredDuringSchedulingIgnoredDuringExecution`(weight 100) — 강제가 아니라 권장이라, 지금은 우연히 둘 다 chan09에 몰려있다. 이 상태로는 chan09가 죽으면 클러스터 DNS가 통째로 끊긴다 — 아직 손 안 댄 약점.
-- **ingress-nginx-controller (replicas 2, 노드당 1개씩 고정)**: [`05-ingress.md`](../lessons/05-ingress.md)에서 anti-affinity를 `requiredDuringScheduling`(강제)로 직접 추가했다. 그래서 항상 양쪽에 하나씩 뜬다.
+- 둘 다 control-plane taint를 참는 toleration이 있고, "같은 라벨의 파드는 서로 다른 노드에"를 `requiredDuringSchedulingIgnoredDuringExecution`(강제)로 걸어놔서 항상 노드당 1개씩 유지된다.
+- coredns는 원래 기본값이 `preferredDuringScheduling`(권장, 강제 아님)이라 처음엔 우연히 둘 다 chan09에 몰려있었다 — chan09가 죽으면 클러스터 DNS가 통째로 끊기는 상태였다. `kubectl patch`로 `required`로 바꾸고 파드 하나를 지워서 강제로 재배치시켜 해결했다 (Deployment의 파드 템플릿을 바꿔도 이미 떠 있는 파드는 스스로 안 움직이므로, 최소 하나는 삭제해서 다시 뜨게 해야 새 규칙이 적용된다).
+- ingress-nginx-controller는 [`05-ingress.md`](../lessons/05-ingress.md)에서 처음부터 `required`로 만들었다.
 
 ### 5. 임시 파드 — cm-acme-http-solver-*
 ```bash
