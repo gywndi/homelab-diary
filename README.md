@@ -20,5 +20,8 @@
 5. Ingress + 인증서 자동화
    - MetalLB + ingress-nginx + cert-manager
    - 문서 [바로가기](lessons/05-ingress.md) · 운영 명령 [바로가기](lessons/05-ingress-ops.md) · 스크립트 [바로가기](scripts/05-ingress/)
+6. LLM GPU 노드 추가 (3노드, 컨트롤플레인 HA)
+   - GPU 워커 편입 + etcd 쿼럼 3 구성
+   - 문서 [바로가기](lessons/06-llm-gpu-node.md) · 스크립트 [바로가기](scripts/06-llm-gpu-node/)
 
 `lessons/`에 목적, 스크립트별 실행 명령, 설계 결정, 알려진 이슈가 정리되어 있다. `scripts/`에는 실행 스크립트 파일만 있다. `concepts/`에는 [Kubernetes 개념 정리](concepts/kubernetes.md)처럼 배경 개념 설명을 모아둔다.
