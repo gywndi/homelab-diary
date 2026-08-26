@@ -2,89 +2,116 @@
 
 Kubernetes를 처음부터 배우면서 이 클러스터를 만들었다. 새 컴포넌트를 추가할 때마다 그때 필요했던 개념을 여기에 추가한다 — 교과서적 정의보다 "우리 클러스터에서 실제로 이게 왜 필요했는지"를 우선한다.
 
-## 현재 클러스터 현황
+## 파드별 역할과 배치 이유
 
-실제 상태 스냅샷. 아래 개념 설명에서 나오는 것들이 실제로 클러스터에 어떻게 떠 있는지 대조해서 보면 된다. 도메인/Ingress 이름은 실제 값 대신 `app1.example.com` 식으로 치환했다.
+같은 파드라도 "왜 그 노드에 떴는지"는 각자 다른 규칙 때문이다. 실제 설정값 기준으로, 각 항목마다 그걸 직접 조회하는 명령과 결과를 같이 둔다. 도메인/Ingress 이름은 실제 값 대신 `app1.example.com` 식으로 치환했다.
 
+### 0. 노드
+```bash
+kubectl get nodes -o wide
 ```
-=== 노드 ===
+```
 NAME     STATUS   ROLES           AGE   VERSION   INTERNAL-IP
 chan08   Ready    control-plane   38h   v1.36.4   10.5.5.8
 chan09   Ready    <none>          38h   v1.36.4   10.5.5.9
-
-=== 네임스페이스별 파드 ===
-NAMESPACE        NAME                                       READY   STATUS    NODE
-cert-manager     cert-manager-69c7fcbf78-hmn2x              1/1     Running   chan09
-cert-manager     cert-manager-cainjector-69f8c8cdbf-tsshv   1/1     Running   chan09
-cert-manager     cert-manager-webhook-84fd89df64-tf67f      1/1     Running   chan09
-ingress-nginx    ingress-nginx-controller-ccfdd7f8c-cldwc   1/1     Running   chan09
-ingress-nginx    ingress-nginx-controller-ccfdd7f8c-tqpmb   1/1     Running   chan08
-kube-flannel     kube-flannel-ds-xrv7b                      1/1     Running   chan08
-kube-flannel     kube-flannel-ds-z97ts                      1/1     Running   chan09
-kube-system      coredns-589f44dc88-2gsg4                   1/1     Running   chan09
-kube-system      coredns-589f44dc88-q49tq                   1/1     Running   chan09
-kube-system      etcd-chan08                                1/1     Running   chan08
-kube-system      kube-apiserver-chan08                      1/1     Running   chan08
-kube-system      kube-controller-manager-chan08              1/1     Running   chan08
-kube-system      kube-proxy-55bwl                            1/1     Running   chan09
-kube-system      kube-proxy-924dx                            1/1     Running   chan08
-kube-system      kube-scheduler-chan08                       1/1     Running   chan08
-metallb-system   controller-658745d67-49z4m                  1/1     Running   chan09
-metallb-system   speaker-8s7z7                                1/1     Running   chan09
-metallb-system   speaker-tww5r                                1/1     Running   chan08
-
-=== 서비스 (일부) ===
-NAMESPACE        NAME                        TYPE           CLUSTER-IP    EXTERNAL-IP   PORT(S)
-ingress-nginx    ingress-nginx-controller    LoadBalancer   10.96.95.194  10.5.5.2      80:31421/TCP,443:30615/TCP
-kube-system      kube-dns                    ClusterIP      10.96.0.10    <none>        53/UDP,53/TCP,9153/TCP
-default          ext-app1-example-com        ClusterIP      10.104.34.159 <none>        4200/TCP
-default          ext-app2-example-com        ClusterIP      10.107.17.142 <none>        4200/TCP
-default          ext-app3-example-com        ClusterIP      10.99.85.239  <none>        80/TCP
-default          ext-app4-example-com        ClusterIP      10.109.212.113 <none>       13000/TCP
-
-=== Ingress ===
-NAMESPACE   NAME                CLASS   HOSTS               ADDRESS             PORTS
-default     app1-example-com    nginx   app1.example.com    10.5.5.8,10.5.5.9   80, 443
-default     app2-example-com    nginx   app2.example.com    10.5.5.8,10.5.5.9   80, 443
-default     app3-example-com    nginx   app3.example.com    10.5.5.8,10.5.5.9   80, 443
-default     app4-example-com    nginx   app4.example.com    10.5.5.8,10.5.5.9   80, 443
-
-=== 인증서 ===
-NAMESPACE   NAME                    READY   SECRET
-default     app1-example-com-tls    False   app1-example-com-tls
-default     app2-example-com-tls    False   app2-example-com-tls
-default     app3-example-com-tls    True    app3-example-com-tls
-default     app4-example-com-tls    True    app4-example-com-tls
 ```
+chan08만 `control-plane` 롤을 달고 있고, 이 롤에 대응하는 taint가 아래 모든 배치 이유의 출발점이다.
 
-이 표를 보면 위에서 설명한 개념들이 바로 대응된다: `kube-system`의 `coredns-*`가 CoreDNS, `kube-proxy-*`가 kube-proxy, `metallb-system`의 `speaker-*`가 각 노드에 하나씩(DaemonSet), `ingress-nginx-controller-*`가 두 노드에 하나씩(Deployment + anti-affinity), `ext-app*-example-com`이 클러스터 밖 백엔드를 가리키는 Service다.
+### 1. 정적 파드 — etcd, kube-apiserver, kube-controller-manager, kube-scheduler (chan08 전용)
+```bash
+kubectl -n kube-system get pods -l tier=control-plane -o wide
+```
+```
+NAME                             READY   STATUS    NODE
+etcd-chan08                      1/1     Running   chan08
+kube-apiserver-chan08            1/1     Running   chan08
+kube-controller-manager-chan08   1/1     Running   chan08
+kube-scheduler-chan08            1/1     Running   chan08
+```
+- 역할: 클러스터의 두뇌. etcd는 상태 저장소, kube-apiserver는 모든 요청이 거치는 관문, controller-manager/scheduler는 각각 리소스 상태 맞추기와 파드 배치를 담당한다.
+- 왜 chan08에만: 스케줄러가 배치한 일반 파드가 아니라 "정적 파드"다. kubelet이 `/etc/kubernetes/manifests/`에 있는 파일을 그 노드에서만 직접 읽어서 띄우는 방식이라, `kubeadm init`을 실행한 chan08에만 이 파일들이 있다.
+- 관련 설정: `hostNetwork: true`라서 파드 전용 IP(10.244.x) 없이 노드 IP(10.5.5.8)를 그대로 쓴다.
 
-## 파드별 역할과 배치 이유
+### 2. DaemonSet — kube-flannel, kube-proxy, metallb-system/speaker (전부 양쪽 노드에 하나씩)
+```bash
+kubectl -n kube-flannel get pods -o wide
+```
+```
+NAME                    READY   STATUS    NODE
+kube-flannel-ds-xrv7b   1/1     Running   chan08
+kube-flannel-ds-z97ts   1/1     Running   chan09
+```
+```bash
+kubectl -n kube-system get pods -l k8s-app=kube-proxy -o wide
+```
+```
+NAME               READY   STATUS    NODE
+kube-proxy-55bwl   1/1     Running   chan09
+kube-proxy-924dx   1/1     Running   chan08
+```
+```bash
+kubectl -n metallb-system get pods -l component=speaker -o wide
+```
+```
+NAME            READY   STATUS    NODE
+speaker-8s7z7   1/1     Running   chan09
+speaker-tww5r   1/1     Running   chan08
+```
+- 대분류가 같다: DaemonSet은 "노드가 몇 개든 그 수만큼" 뜨는 게 기본 동작이라 셋 다 원칙적으로 모든 노드에 하나씩 있다.
+- 각자 역할: flannel은 파드 네트워크(오버레이) 제공, kube-proxy는 Service 라우팅 규칙(iptables)을 그 노드에 실제로 심어주는 주체, speaker는 VIP에 대한 ARP 응답과 리더 선출.
+- control-plane taint를 무시하는 방식은 서로 다르다 — flannel은 toleration이 `{"effect":"NoSchedule","operator":"Exists"}`로, key를 지정 안 한 와일드카드라 "NoSchedule 계열이면 뭐든 다 참는다." speaker는 MetalLB 매니페스트에 control-plane/master taint를 콕 집어 참는 toleration이 박혀있다. kube-proxy는 kubeadm이 애초에 이 taint를 참도록 만들어서 배포한다.
+- speaker만 `hostNetwork: true`가 추가로 붙는다 — VIP의 ARP 응답은 파드 네트워크가 아니라 노드의 실제 네트워크 인터페이스에서 처리해야 하기 때문.
 
-같은 파드라도 "왜 그 노드에 떴는지"는 각자 다른 규칙 때문이다. 실제 설정값 기준으로 정리.
+### 3. Deployment, toleration 없음 — metallb-system/controller, cert-manager 3종 (전부 chan09)
+```bash
+kubectl -n metallb-system get pods -l component=controller -o wide
+```
+```
+NAME                         READY   STATUS    NODE
+controller-658745d67-49z4m   1/1     Running   chan09
+```
+```bash
+kubectl -n cert-manager get pods -o wide
+```
+```
+NAME                                       READY   STATUS    NODE
+cert-manager-69c7fcbf78-hmn2x              1/1     Running   chan09
+cert-manager-cainjector-69f8c8cdbf-tsshv   1/1     Running   chan09
+cert-manager-webhook-84fd89df64-tf67f      1/1     Running   chan09
+```
+- 역할: controller는 어느 노드가 VIP를 받을지 조정하는 두뇌(실제 트래픽 처리는 speaker가 함), cert-manager 3종은 인증서 발급/갱신 처리.
+- 왜 chan09에만: 이 파드들엔 toleration이 아예 없다. control-plane taint가 있는 chan08엔 원천적으로 못 뜨고, 남은 노드가 chan09 하나뿐이라 자동으로 그리로 간다. 실제 트래픽 경로에 있는 게 아니라 지금은 이대로 둬도 무방.
 
-1. **정적 파드 — etcd, kube-apiserver, kube-controller-manager, kube-scheduler (chan08 전용)**
-   - 역할: 클러스터의 두뇌. etcd는 상태 저장소, kube-apiserver는 모든 요청이 거치는 관문, controller-manager/scheduler는 각각 리소스 상태 맞추기와 파드 배치를 담당한다.
-   - 왜 chan08에만: 스케줄러가 배치한 일반 파드가 아니라 "정적 파드"다. kubelet이 `/etc/kubernetes/manifests/`에 있는 파일을 그 노드에서만 직접 읽어서 띄우는 방식이라, `kubeadm init`을 실행한 chan08에만 이 파일들이 있다.
-   - 관련 설정: `hostNetwork: true`라서 파드 전용 IP(10.244.x) 없이 노드 IP(10.5.5.8)를 그대로 쓴다.
+### 4. Deployment + anti-affinity로 노드 분산 시도 — coredns vs ingress-nginx-controller (같은 의도, 다른 결과)
+```bash
+kubectl -n kube-system get pods -l k8s-app=kube-dns -o wide
+```
+```
+NAME                       READY   STATUS    NODE
+coredns-589f44dc88-2gsg4   1/1     Running   chan09
+coredns-589f44dc88-q49tq   1/1     Running   chan09
+```
+```bash
+kubectl -n ingress-nginx get pods -l app.kubernetes.io/component=controller -o wide
+```
+```
+NAME                                       READY   STATUS    NODE
+ingress-nginx-controller-ccfdd7f8c-cldwc   1/1     Running   chan09
+ingress-nginx-controller-ccfdd7f8c-tqpmb   1/1     Running   chan08
+```
+- 대분류는 같다: 둘 다 "같은 라벨의 파드는 서로 다른 노드에 뜨면 좋겠다"는 anti-affinity가 걸려있고, 둘 다 control-plane taint를 참는 toleration도 있다. 그런데 강제 수준이 달라서 결과가 갈린다.
+- **coredns (replicas 2, 지금은 우연히 둘 다 chan09)**: `podAntiAffinity.preferredDuringSchedulingIgnoredDuringExecution`(weight 100) — 강제가 아니라 권장이라, 지금은 우연히 둘 다 chan09에 몰려있다. 이 상태로는 chan09가 죽으면 클러스터 DNS가 통째로 끊긴다 — 아직 손 안 댄 약점.
+- **ingress-nginx-controller (replicas 2, 노드당 1개씩 고정)**: [`05-ingress.md`](../lessons/05-ingress.md)에서 anti-affinity를 `requiredDuringScheduling`(강제)로 직접 추가했다. 그래서 항상 양쪽에 하나씩 뜬다.
 
-2. **DaemonSet — kube-flannel, kube-proxy, metallb-system/speaker (전부 양쪽 노드에 하나씩)**
-   - 대분류가 같다: DaemonSet은 "노드가 몇 개든 그 수만큼" 뜨는 게 기본 동작이라 셋 다 원칙적으로 모든 노드에 하나씩 있다.
-   - 각자 역할: flannel은 파드 네트워크(오버레이) 제공, kube-proxy는 Service 라우팅 규칙(iptables)을 그 노드에 실제로 심어주는 주체, speaker는 VIP에 대한 ARP 응답과 리더 선출.
-   - control-plane taint를 무시하는 방식은 서로 다르다 — flannel은 toleration이 `{"effect":"NoSchedule","operator":"Exists"}`로, key를 지정 안 한 와일드카드라 "NoSchedule 계열이면 뭐든 다 참는다." speaker는 MetalLB 매니페스트에 control-plane/master taint를 콕 집어 참는 toleration이 박혀있다. kube-proxy는 kubeadm이 애초에 이 taint를 참도록 만들어서 배포한다.
-   - speaker만 `hostNetwork: true`가 추가로 붙는다 — VIP의 ARP 응답은 파드 네트워크가 아니라 노드의 실제 네트워크 인터페이스에서 처리해야 하기 때문.
-
-3. **Deployment, toleration 없음 — metallb-system/controller, cert-manager 3종 (전부 chan09)**
-   - 역할: controller는 어느 노드가 VIP를 받을지 조정하는 두뇌(실제 트래픽 처리는 speaker가 함), cert-manager 3종은 인증서 발급/갱신 처리.
-   - 왜 chan09에만: 이 파드들엔 toleration이 아예 없다. control-plane taint가 있는 chan08엔 원천적으로 못 뜨고, 남은 노드가 chan09 하나뿐이라 자동으로 그리로 간다. 실제 트래픽 경로에 있는 게 아니라 지금은 이대로 둬도 무방.
-
-4. **Deployment + anti-affinity로 노드 분산 시도 — coredns vs ingress-nginx-controller (같은 의도, 다른 결과)**
-   - 대분류는 같다: 둘 다 "같은 라벨의 파드는 서로 다른 노드에 뜨면 좋겠다"는 anti-affinity가 걸려있고, 둘 다 control-plane taint를 참는 toleration도 있다. 그런데 강제 수준이 달라서 결과가 갈린다.
-   - **coredns (replicas 2, 지금은 우연히 둘 다 chan09)**: `podAntiAffinity.preferredDuringSchedulingIgnoredDuringExecution`(weight 100) — 강제가 아니라 권장이라, 지금은 우연히 둘 다 chan09에 몰려있다. 이 상태로는 chan09가 죽으면 클러스터 DNS가 통째로 끊긴다 — 아직 손 안 댄 약점.
-   - **ingress-nginx-controller (replicas 2, 노드당 1개씩 고정)**: [`05-ingress.md`](../lessons/05-ingress.md)에서 anti-affinity를 `requiredDuringScheduling`(강제)로 직접 추가했다. 그래서 항상 양쪽에 하나씩 뜬다.
-
-5. **임시 파드 — cm-acme-http-solver-\* (default 네임스페이스)**
-   - 역할: cert-manager가 인증서 발급 순간에만 잠깐 만드는 ACME HTTP-01 챌린지 응답용 파드. 발급이 끝나면 자동으로 사라진다.
+### 5. 임시 파드 — cm-acme-http-solver-*
+```bash
+kubectl get pods -A | grep acme-http-solver
+```
+```
+default   cm-acme-http-solver-gbd9l   1/1   Running   0   64m
+default   cm-acme-http-solver-vjltg   1/1   Running   0   64m
+```
+- 역할: cert-manager가 인증서 발급 순간에만 잠깐 만드는 ACME HTTP-01 챌린지 응답용 파드. 발급이 끝나면 자동으로 사라진다.
 
 ## 기본 단위
 
