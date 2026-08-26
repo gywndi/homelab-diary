@@ -59,6 +59,45 @@ default     app4-example-com-tls    True    app4-example-com-tls
 
 이 표를 보면 위에서 설명한 개념들이 바로 대응된다: `kube-system`의 `coredns-*`가 CoreDNS, `kube-proxy-*`가 kube-proxy, `metallb-system`의 `speaker-*`가 각 노드에 하나씩(DaemonSet), `ingress-nginx-controller-*`가 두 노드에 하나씩(Deployment + anti-affinity), `ext-app*-example-com`이 클러스터 밖 백엔드를 가리키는 Service다.
 
+## 파드별 역할과 배치 이유
+
+같은 파드라도 "왜 그 노드에 떴는지"는 각자 다른 규칙 때문이다. 실제 설정값 기준으로 정리.
+
+1. **etcd-chan08, kube-apiserver-chan08, kube-controller-manager-chan08, kube-scheduler-chan08 (chan08에만)**
+   - 역할: 클러스터의 두뇌. etcd는 상태 저장소, kube-apiserver는 모든 요청이 거치는 관문, controller-manager/scheduler는 각각 리소스 상태 맞추기와 파드 배치를 담당한다.
+   - 왜 chan08에만: 스케줄러가 배치한 일반 파드가 아니라 "정적 파드"다. kubelet이 `/etc/kubernetes/manifests/`에 있는 파일을 그 노드에서만 직접 읽어서 띄우는 방식이라, `kubeadm init`을 실행한 chan08에만 이 파일들이 있다.
+   - 관련 설정: `hostNetwork: true`라서 파드 전용 IP(10.244.x) 없이 노드 IP(10.5.5.8)를 그대로 쓴다.
+
+2. **kube-flannel-ds-* (DaemonSet, 양쪽 노드)**
+   - 역할: 파드 네트워크(오버레이) 제공. 서로 다른 노드의 파드끼리 통신 가능하게 해준다.
+   - 왜 양쪽에: DaemonSet이라 원칙적으로 모든 노드에 하나씩 뜬다.
+   - 관련 설정: toleration이 `{"effect":"NoSchedule","operator":"Exists"}` — key를 지정하지 않은 와일드카드라 "NoSchedule 계열 taint는 뭐가 됐든 다 참는다"는 뜻. 그래서 chan08의 control-plane taint에도 걸리지 않는다.
+
+3. **kube-proxy-* (DaemonSet, 양쪽 노드)**
+   - 역할: Service 라우팅 규칙(iptables)을 그 노드에 실제로 심어주는 주체.
+   - 왜 양쪽에: 어느 노드로 패킷이 들어오든 그 노드 자신이 라우팅을 처리해야 해서 모든 노드에 필수.
+
+4. **coredns-* (Deployment, replicas 2 — 지금은 우연히 둘 다 chan09)**
+   - 역할: 클러스터 내부 DNS.
+   - 왜 chan09에 몰려있나: control-plane taint를 참는 toleration은 있어서 chan08에도 뜰 수 있는데, "서로 다른 노드에 뜨면 좋겠다"는 설정이 강제가 아니라 `preferred`(권장)라서 지금은 우연히 둘 다 chan09에 있다. 즉 지금 상태로는 chan09가 죽으면 클러스터 DNS가 통째로 끊긴다 — 아직 손 안 댄 약점.
+   - 관련 설정: `podAntiAffinity.preferredDuringSchedulingIgnoredDuringExecution`(weight 100, 강제 아님).
+
+5. **metallb-system/speaker-* (DaemonSet, 양쪽 노드, hostNetwork)**
+   - 역할: VIP에 대한 ARP 응답과 리더 선출.
+   - 왜 양쪽에: 어느 노드든 VIP를 넘겨받을 수 있어야 해서 모든 노드에 필수. MetalLB 자체 매니페스트에 control-plane/master taint를 명시적으로 참는 toleration이 이미 박혀있다.
+   - 관련 설정: `hostNetwork: true` — 실제 네트워크 인터페이스에서 직접 ARP를 다뤄야 해서 파드 네트워크가 아니라 노드 네트워크를 그대로 쓴다.
+
+6. **metallb-system/controller-*, cert-manager 계열 3개 (Deployment, replicas 1, 전부 chan09)**
+   - 역할: controller는 어느 노드가 VIP를 받을지 조정하는 두뇌(실제 트래픽 처리는 speaker가 함), cert-manager 3종은 인증서 발급/갱신 처리.
+   - 왜 chan09에만: 이 파드들엔 toleration이 아예 없다. 그래서 control-plane taint가 있는 chan08엔 원천적으로 못 뜨고, 남은 노드가 chan09 하나뿐이라 자동으로 그리로 간다. 실제 트래픽 경로에 있는 게 아니라 지금은 이대로 둬도 무방.
+
+7. **ingress-nginx-controller-* (Deployment, replicas 2, 노드당 1개씩)**
+   - 역할: 실제 요청을 받아 도메인별로 맞는 백엔드로 라우팅.
+   - 왜 노드당 1개씩: [`05-ingress.md`](../lessons/05-ingress.md)에서 의도적으로 만든 구성이다. control-plane taint를 참는 toleration과, "같은 라벨의 파드는 서로 다른 노드에"를 강제하는 anti-affinity(`requiredDuringScheduling`)를 직접 추가했다. coredns와 달리 이건 강제라서 항상 양쪽에 하나씩 뜬다.
+
+8. **cm-acme-http-solver-* (default 네임스페이스, 임시)**
+   - 역할: cert-manager가 인증서 발급 순간에만 잠깐 만드는 ACME HTTP-01 챌린지 응답용 파드. 발급이 끝나면 자동으로 사라진다.
+
 ## 기본 단위
 
 ### 클러스터 / 노드
