@@ -11,10 +11,13 @@ spec:
       size: 3
       requireSafeReplicaSize: true
   dataPool:
+    # 연구/테스트용 데이터라 손실 시 재생성 가능 — 용량 확보를 위해 2-replica로 낮춤.
+    # min_size은 Ceph 기본 동작상 size=2일 때 자동으로 1이 됨(size=3->min_size=2와 같은 원리) —
+    # 노드 하나가 죽어도 쓰기는 막히지 않지만, 그 상태에서 남은 복제본까지 잃으면 데이터 손실 위험 있음(허용 결정).
     failureDomain: host
     replicated:
-      size: 3
-      requireSafeReplicaSize: true
+      size: 2
+      requireSafeReplicaSize: false
     parameters:
       bulk: "true"
   preservePoolsOnDelete: false
