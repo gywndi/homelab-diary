@@ -1,6 +1,6 @@
 # Ceph 스토리지 레이어 도입 (진행 중)
 
-> 이 문서는 초안이다. 검증까지 끝나면 `lessons/`로 옮겨 다듬는다. 2026-08-27 기준: MySQL 물리 이전, 3노드 `/data` wipe, Rook-Ceph 클러스터(mon/mgr/osd) + RBD StorageClass + RGW(S3, VIP 노출)까지 전부 완료.
+> 이 문서는 초안이다. 검증까지 끝나면 `lessons/`로 옮겨 다듬는다. 2026-08-27 기준: Rook-Ceph 클러스터(mon/mgr/osd) + RBD StorageClass + RGW(S3, VIP 노출) + MySQL을 RBD PVC 기반 k8s 워크로드로 컷오버까지 전부 완료. 남은 건 KVM libvirt를 RBD로 전환하는 것과 StarRocks 연동뿐.
 
 StarRocks 컴퓨팅/스토리지 분리 구성을 테스트해보기 전에, 그 전제가 되는 스토리지 레이어를 Ceph로 통일하기로 했다. 새 장비를 들이지 않고 기존 3노드(chan08/chan09/llm001)를 재구성하는 것만으로 진행한다.
 
@@ -61,15 +61,13 @@ flowchart TB
 - **CephObjectStore의 gateway.service는 Service `type`을 지정할 수 없다.** annotations/labels만 지원해서, Rook이 소유한 `rook-ceph-rgw-*` Service를 `kubectl patch`로 LoadBalancer로 바꿔도 operator가 reconcile할 때마다 ClusterIP로 도로 바뀐다(MetalLB가 VIP를 할당해도 몇 초 뒤 사라짐 — 처음엔 "MetalLB가 불안정하다"고 오인했는데, 실제로는 Service 자체가 계속 리셋되고 있었다). Rook 소유 Service는 그대로 두고, 같은 파드 라벨을 셀렉터로 쓰는 별도 Service를 만들어 그것만 LoadBalancer로 노출하는 방식으로 해결.
 - **CephObjectStore 삭제가 자기 자신을 참조하는 순환으로 멈췄다.** 방화벽 문제로 실패했던 시도들이 `.rgw.root`에 realm/zonegroup/zone은 만들어졌지만 period가 없는 반쪽 상태를 남겼는데, 이 CR을 지우려 하면 finalizer가 "버킷이 있는지" 확인하려고 RGW 자신의 HTTP API를 호출한다 — 근데 그 RGW는 애초에 뜬 적이 없으니 연결 거부로 finalizer가 영원히 못 끝난다. 버킷이 존재한 적이 없다는 걸 확인한 뒤 finalizer를 강제로 비우고, 남은 rados 오브젝트/풀은 직접 정리한 뒤 처음부터 재생성했다.
 
-## 중간 점검 (2026-08-27) — 현재 남아있는 리스크
+## 중간 점검 (2026-08-27) — MySQL 이전 전 남아있던 리스크 (현재 대부분 해소)
 
-지금까지 겪은 이슈는 대부분 원인을 찾아 해결했지만, 다음 것들은 아직 열려있는 채로 다음 단계(MySQL 이전)로 넘어간다.
-
-- **MySQL이 지금 완전한 단일 장애점 상태다.** chan09 레플리카는 이미 폐기(mysqld 중지, `/data` wipe)했고, chan08의 새 StatefulSet은 아직 없다 — 그 사이 구간엔 chan08 하나가 죽으면 DB 전체가 그냥 다운되고 자동 복구 수단이 없다. 원래 있던 semi-sync 복제/자동 페일오버 안전망을 스스로 걷어낸 뒷단이라, 이 창을 최대한 빨리 닫는 게 다음 단계의 목표다.
-- **Rook operator의 reconcile-stall이 세 번(mon, CephBlockPool, CephObjectStore) 재현됐는데 근본 원인은 못 찾았다.** 매번 "로그에 에러 없이 조용히 멈춤 → operator 재시작으로 해결"이었다. MySQL PVC를 새로 만들 때도 같은 증상이 또 나올 가능성이 있다 — 몇 분 이상 진행이 안 보이면 재시작부터 시도할 것.
+- **MySQL 단일 장애점 창** — chan09 레플리카 폐기 후 새 워크로드 컷오버 전까지 존재했던 구간. → RBD PVC 컷오버 완료로 해소(아래 참고). 다만 지금도 replica는 1개뿐이라 "애플리케이션 레벨 이중화 없음"은 여전 — 내구성은 Ceph 3-replica가, 재기동은 k8s 재스케줄이 담당하는 구조로 대체됐을 뿐.
+- **Rook operator의 reconcile-stall이 세 번(mon, CephBlockPool, CephObjectStore) 재현됐는데 근본 원인은 못 찾았다.** 매번 "로그에 에러 없이 조용히 멈춤 → operator 재시작으로 해결"이었다. MySQL PVC 생성 때는 재현되지 않고 바로 Bound됐다 — 재현 조건이 명확하진 않다.
 - **Ceph usable 용량(821GiB)을 RBD와 RGW가 통째로 나눠 쓴다.** MySQL(17G)+KVM+StarRocks 테스트 데이터가 전부 여기 들어간다. StarRocks 데이터셋 규모에 따라 여유가 빠듯해질 수 있다.
 - **RGW dataPool은 size=2/min_size=1로 의도적으로 낮췄다** — 연구용 데이터라 손실을 감수하기로 한 결정이지 버그는 아니지만, 다른 노드 장애와 겹치면 실제로 데이터가 날아갈 수 있다는 걸 계속 염두에 둘 것.
-- **VIP(`10.5.5.6`, 그리고 다음 단계에서 재사용할 `10.5.5.4`)가 라우터 DHCP 임대 대역과 안 겹치는지 아직 미확인** — `internal/ip-inventory.md`에 이미 있던 TODO 항목이고 이번 작업으로 새로 생긴 문제는 아니다.
+- **VIP(`10.5.5.6`, `10.5.5.4`)가 라우터 DHCP 임대 대역과 안 겹치는지 아직 미확인** — `internal/ip-inventory.md`에 이미 있던 TODO 항목이고 이번 작업으로 새로 생긴 문제는 아니다.
 - HEALTH_WARN(insecure key type 경고)은 무해하지만 커널 6.8에서는 해소 불가(7.0+ 필요) — 낮은 우선순위로 그냥 둔다.
 
 ## 진행 상태
@@ -78,7 +76,7 @@ flowchart TB
 - [x] **Rook-Ceph 클러스터 배포 완료 (2026-08-27)** — mon 3(quorum a,b,c) + mgr 1 + OSD 3(chan08/chan09/llm001, 총 2.5TiB) 모두 정상. `HEALTH_WARN`은 insecure key type 경고뿐(커널 6.8이라 legacy AES 키 사용 — 의도된 설정). 실사용 가능 용량은 `ceph df` 기준 약 821GiB(3-replica 반영, llm001 디스크가 작아 병목)
 - [x] **RBD pool + StorageClass 생성 완료 (2026-08-27)** — `rbd-pool`(size=3/min_size=2), exclusive-lock 포함
 - [x] **RGW(오브젝트 스토어) 생성 + VIP 노출 완료 (2026-08-27)** — dataPool은 연구용이라 용량 우선으로 size=2/min_size=1로 낮춤(metadataPool은 3 유지), VIP `10.5.5.6:7480`에서 정상 응답 확인
-- [ ] MySQL StatefulSet 배포 + `/home` 데이터를 RBD PVC로 이전 + VIP 컷오버
+- [x] **MySQL을 RBD PVC 기반 k8s 워크로드로 컷오버 완료 (2026-08-27)** — `mysql` 네임스페이스에 Deployment(replicas=1, Recreate 전략) + 30Gi RBD PVC로 재배포. StatefulSet 대신 Deployment+Recreate를 쓴 이유는 단일 인스턴스라 StatefulSet의 순번 관리가 실익이 없어서. 데이터는 chan08에서 mysqld를 내리고 `tar` 스트림으로 임시 파드에 복사(17G, 약 5분) 후 이관. VIP `10.5.5.4`는 keepalived를 내리고 MetalLB로 같은 IP를 재할당해 애플리케이션 재설정 없이 유지. **총 다운타임 약 6분 38초**(21:38:12~21:44:50). 기존 keepalived/native mysql은 `systemctl disable`만 해두고 데이터·설정은 롤백 안전망으로 보존 중(완전 제거는 안정성 확인 후 별도 진행)
 - [ ] libvirt storage pool을 rbd 타입으로 재정의
 - [ ] StarRocks 배포 시 RGW 엔드포인트 연동
 
@@ -90,5 +88,9 @@ flowchart TB
 - 블록 스토리지: [`03-apply-storageclass.sh`](../scripts/07-ceph-storage/03-apply-storageclass.sh) + [`03-storageclass.yaml`](../scripts/07-ceph-storage/03-storageclass.yaml) — RBD 풀(3-replica) + StorageClass, exclusive-lock 포함
 - 오브젝트 스토리지: [`04-apply-objectstore.sh`](../scripts/07-ceph-storage/04-apply-objectstore.sh) + [`04-objectstore.yaml`](../scripts/07-ceph-storage/04-objectstore.yaml) — RGW + MetalLB VIP 노출
 - MySQL 백업: [`05-backup-mysql.sh`](../scripts/07-ceph-storage/05-backup-mysql.sh) — 전체 mysqldump (안전망)
-- MySQL 이전: [`06-relocate-mysql-datadir.sh`](../scripts/07-ceph-storage/06-relocate-mysql-datadir.sh) — datadir을 `/data`→`/home`으로 물리 복사 이전 (AppArmor/log_bin 경로 수정 포함)
+- MySQL 이전(임시): [`06-relocate-mysql-datadir.sh`](../scripts/07-ceph-storage/06-relocate-mysql-datadir.sh) — datadir을 `/data`→`/home`으로 물리 복사 이전 (AppArmor/log_bin 경로 수정 포함). k8s 컷오버 전 임시 단계였음
 - 디스크 wipe: [`07-wipe-data-disk.sh`](../scripts/07-ceph-storage/07-wipe-data-disk.sh) — `/data`를 raw 상태로 전환
+- MySQL k8s 리소스: [`08-mysql-configmap-pvc.yaml`](../scripts/07-ceph-storage/08-mysql-configmap-pvc.yaml) — 네임스페이스/ConfigMap/RBD PVC(30Gi)
+- MySQL 데이터 이전: [`09-mysql-migrate-data.sh`](../scripts/07-ceph-storage/09-mysql-migrate-data.sh) — 원본 mysqld 정지 후 tar 스트림으로 PVC에 복사(다운타임 유발 구간)
+- MySQL 배포: [`10-mysql-deploy.yaml`](../scripts/07-ceph-storage/10-mysql-deploy.yaml) — Deployment(replicas=1, Recreate) + Service
+- MySQL VIP 컷오버: [`11-mysql-vip-cutover.sh`](../scripts/07-ceph-storage/11-mysql-vip-cutover.sh) — keepalived 중지 → MetalLB로 같은 VIP 재할당

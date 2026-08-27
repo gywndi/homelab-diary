@@ -1,0 +1,54 @@
+# MySQL Deployment — 단일 인스턴스라 StatefulSet의 순번/volumeClaimTemplate 관리가
+# 실익이 없어 Deployment(replicas=1) + Recreate 전략 + 명시적 PVC로 대체.
+# Recreate 전략이 RWO PVC 핸드오프(파드 완전 종료 후에만 새 파드가 뜸)에 필요.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mysql
+  namespace: mysql
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: mysql
+  template:
+    metadata:
+      labels:
+        app: mysql
+    spec:
+      containers:
+        - name: mysql
+          image: mysql:8.0.46
+          ports:
+            - containerPort: 3306
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/mysql
+            - name: config
+              mountPath: /etc/mysql/conf.d
+          resources:
+            limits:
+              memory: 3Gi
+            requests:
+              memory: 2Gi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: mysql-data
+        - name: config
+          configMap:
+            name: mysql-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql
+  namespace: mysql
+spec:
+  selector:
+    app: mysql
+  ports:
+    - port: 3306
+      targetPort: 3306
