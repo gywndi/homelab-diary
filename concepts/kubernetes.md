@@ -28,8 +28,14 @@ flowchart TB
     end
 
     CP -- "스케줄링 결정, 상태 동기화" --> DS
+
+    PODNS["일반 파드가 이름으로 뭔가를 찾을 때"] --> PROXY
+    PROXY --> DNS1["coredns (chan08)"]
+    PROXY --> DNS2["coredns (chan09)"]
+    DNS1 -- "실제 ClusterIP로 응답" --> PODNS
+    DNS2 -- "실제 ClusterIP로 응답" --> PODNS
 ```
-컨트롤플레인 3대는 완전히 대칭이고 etcd raft로 쿼럼을 유지한다. DaemonSet 층(flannel/kube-proxy/speaker)은 모든 노드에 깔린 인프라 배관으로, 컨트롤플레인의 결정을 각 노드에서 실제로 실행한다.
+컨트롤플레인 3대는 완전히 대칭이고 etcd raft로 쿼럼을 유지한다. DaemonSet 층(flannel/kube-proxy/speaker)은 모든 노드에 깔린 인프라 배관으로, 컨트롤플레인의 결정을 각 노드에서 실제로 실행한다. CoreDNS는 DaemonSet이 아니라 Deployment(x2, anti-affinity로 노드당 1개)라서 위 DaemonSet 그룹과 분리해서 그렸다 — 파드가 이름으로 뭔가를 찾을 때도 결국 kube-proxy를 거쳐 coredns 파드로 분산된다(2번 다이어그램의 nginx 트래픽과 같은 경로 패턴).
 
 ### 2. 인터넷 → nginx 처리 (Ingress 트래픽 경로)
 
