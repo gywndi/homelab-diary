@@ -30,7 +30,7 @@ ufw allow from "$SUBNET" to any port 10257 proto tcp comment 'kube-controller-ma
 ufw allow from "$SUBNET" to any port 10259 proto tcp comment 'kube-scheduler'
 
 echo "== keepalived VRRP (컨트롤플레인 API VIP) =="
-ufw allow from "$SUBNET" proto vrrp
+ufw allow from "$SUBNET" proto vrrp comment 'keepalived VRRP (컨트롤플레인 API VIP)'
 
 echo "== MetalLB memberlist (speaker 간 리더 선출용 가십 프로토콜) =="
 ufw allow from "$SUBNET" to any port 7946 proto tcp comment 'MetalLB memberlist'

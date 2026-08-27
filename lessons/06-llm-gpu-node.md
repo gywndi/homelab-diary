@@ -79,7 +79,7 @@ sudo ufw allow from "$SUBNET" to any port 10257 proto tcp comment 'kube-controll
 sudo ufw allow from "$SUBNET" to any port 10259 proto tcp comment 'kube-scheduler'
 
 # keepalived VRRP (컨트롤플레인 API VIP)
-sudo ufw allow from "$SUBNET" proto vrrp
+sudo ufw allow from "$SUBNET" proto vrrp comment 'keepalived VRRP (컨트롤플레인 API VIP)'
 
 # MetalLB memberlist (speaker 간 리더 선출용 가십 프로토콜)
 sudo ufw allow from "$SUBNET" to any port 7946 proto tcp comment 'MetalLB memberlist'
@@ -87,6 +87,7 @@ sudo ufw allow from "$SUBNET" to any port 7946 proto udp comment 'MetalLB member
 
 sudo ufw reload
 ```
+이 스크립트가 열어주는 건 k8s 관련 포트뿐이다. `sudo ufw status`로 llm001을 보면 이 목록에 없는 `11434/tcp`(ollama), `4200/tcp`(box.abcyon.com 백엔드)도 같이 보이는데, 이 둘은 llm001이 k8s에 편입되기 전부터 돌리던 이 노드 자체 서비스용 포트라 이 저장소의 어떤 스크립트도 열지 않는다 (SSH 22/tcp도 마찬가지 — 편입 전부터 이미 열려 있었음).
 
 ### NVIDIA 드라이버 재설치
 - 설명: 기존 드라이버를 완전히 제거하고 `ubuntu-drivers devices`가 추천하는 버전으로 재설치한다.

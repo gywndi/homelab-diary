@@ -43,6 +43,29 @@ flowchart TB
 
 ## 스크립트 목록 (이름 순)
 
+### 방화벽 포트 추가
+- 설명: MetalLB(speaker 간 memberlist)와 ingress-nginx(HTTP/HTTPS)에 필요한 포트를 연다 (양쪽 노드 모두). 지금까지의 규칙은 전부 내부망(`10.5.5.0/24`)만 허용했지만, 80/443은 인터넷에서 들어오는 트래픽을 그대로 받아야 해서 범위가 다르다.
+- 스크립트: [`00-open-ingress-firewall-ports.sh`](../scripts/05-ingress/00-open-ingress-firewall-ports.sh)
+
+| 포트 | 프로토콜 | 허용 대상 | 용도 |
+|------|----------|-----------|------|
+| 7946 | tcp/udp | `10.5.5.0/24` | MetalLB speaker 간 memberlist (리더 선출) |
+| 80 | tcp | 전체 | HTTP (ingress, ACME HTTP-01 챌린지) |
+| 443 | tcp | 전체 | HTTPS (ingress) |
+
+```bash
+# MetalLB speaker 간 memberlist (리더 선출용 가십 프로토콜)
+sudo ufw allow from 10.5.5.0/24 to any port 7946 proto tcp comment 'MetalLB memberlist'
+sudo ufw allow from 10.5.5.0/24 to any port 7946 proto udp comment 'MetalLB memberlist'
+
+# HTTP - 인터넷 전체에서 허용 (ingress, ACME HTTP-01 챌린지)
+sudo ufw allow 80/tcp comment 'HTTP (ingress, ACME)'
+
+# HTTPS - 인터넷 전체에서 허용 (ingress)
+sudo ufw allow 443/tcp comment 'HTTPS (ingress)'
+```
+7946을 빠뜨리면 어떻게 되는지는 [`06-llm-gpu-node.md`의 관련 알려진 이슈](06-llm-gpu-node.md#llm001-방화벽에-metallb-memberlist-포트가-빠지면-speaker-간-통신이-불안정해짐) 참고 — 실제로 이 포트가 없던 노드 하나 때문에 ingress VIP 전체가 죽은 적이 있다.
+
 ### MetalLB 설치
 - 설명: bare-metal용 LoadBalancer 구현체를 설치한다.
 - 스크립트: [`01-install-metallb.sh`](../scripts/05-ingress/01-install-metallb.sh)
