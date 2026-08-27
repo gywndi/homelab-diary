@@ -44,8 +44,11 @@ spec:
   - mysql-pool
 EOF
 
-echo "== mysql Service를 LoadBalancer로 노출 =="
-kubectl -n mysql patch svc mysql -p '{"spec":{"type":"LoadBalancer"}}'
+echo "== mysql Service를 LoadBalancer로 노출 (externalTrafficPolicy: Local 필수) =="
+# Cluster(기본값)로 두면 트래픽을 받은 노드와 파드가 있는 노드가 다를 때 kube-proxy가
+# SNAT을 해서 MySQL이 보는 클라이언트 IP가 실제 IP가 아니게 된다 — host@'10.5.5.%' 같은
+# 호스트 기반 grant가 전부 깨진다(단일 replica라 Local로 바꿔도 가용성엔 영향 없음).
+kubectl -n mysql patch svc mysql -p '{"spec":{"type":"LoadBalancer","externalTrafficPolicy":"Local"}}'
 sleep 3
 kubectl -n mysql get svc mysql
 

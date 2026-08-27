@@ -92,6 +92,12 @@ size=3 replication 쓰기는 클라이언트→primary OSD로 들어온 뒤 prim
 
 StarRocks 집계 쿼리가 Ceph 자체는 느린데도 30ms 미만으로 빠른 건 CN의 로컬 데이터 캐시 덕분 — "콜드 데이터는 네트워크/Ceph 속도에 매여있고, 캐시된 데이터는 빠르다"는 shared-data 구조의 트레이드오프가 실측으로 확인됐다.
 
+## 컷오버 이후 발견/수정한 문제 (2026-08-28)
+
+- **`innodb_flush_log_at_trx_commit`을 2로 낮췄다.** 1GbE 병목 위에서 매 트랜잭션 커밋마다 fsync를 강제하면 그 자체가 매번 네트워크 왕복을 유발한다. 2로 바꾸면 fsync가 1초에 한 번으로 묶여서 커밋 지연이 크게 줄어든다 — mysqld 크래시엔 안전하고, OS/서버 자체가 죽는 경우에만 최근 1초 데이터를 잃을 수 있는 정도의 위험만 감수. 런타임 적용 + ConfigMap에도 영구 반영.
+- **semi-sync 복제 잔재가 첫 커밋을 10초 가까이 멈추게 하고 있었다.** chan08에서 물리 복사로 datadir을 옮길 때 `rpl_semi_sync_source_enabled=1`이 persisted variable로 그대로 딸려왔다 — 레플리카(chan09)는 이미 폐기했는데 소스는 여전히 "레플리카의 ack를 기다리는" 상태였던 것. 실제로는 컷오버 직후 첫 트랜잭션에서 딱 한 번(`Rpl_semi_sync_source_no_times=1`) 10초 타임아웃을 맞고 자동으로 async로 전환돼 그 이후 1440건은 정상 처리됐지만, **파드가 재시작될 때마다 이 10초 스톨이 다시 발생할 수 있는 잠재 위험**이었다. `UNINSTALL PLUGIN` + `RESET PERSIST`로 완전히 제거.
+- **가장 심각했던 문제: `externalTrafficPolicy`가 기본값 `Cluster`라 MySQL 호스트 기반 인증이 깨져 있었다.** 컷오버 직후부터 `stock-crawler-api`(맥 스튜디오에서 도커로 운영 중인 실제 서비스)의 DB 관련 API가 전부 500 에러를 내고 있었다 — `ext-stock-abcyon` ingress 프록시 로그를 보고서야 발견했다(`/api/collections/*/status`는 200인데 `/api/stocks`, `/auth/login` 등 DB를 만지는 라우트만 500). `Cluster` 정책에서는 트래픽이 받은 노드와 실제 파드가 있는 노드가 다르면 kube-proxy가 SNAT을 하는데, 이때 MySQL이 보는 클라이언트 IP가 `stock@'10.5.5.%'` 같은 호스트 기반 grant와 안 맞는 이상한 주소(`10.244.0.0`)로 바뀌어버렸다. `externalTrafficPolicy: Local`로 바꿔서 원본 클라이언트 IP를 보존하도록 해결 — 단일 replica라 이 정책으로 바꿔도 가용성엔 영향 없음. **호스트 기반 MySQL 인증을 쓰는 상태에서 MetalLB LoadBalancer Service로 노출할 때는 `externalTrafficPolicy: Local`이 필수라는 걸 배웠다** — 컷오버 스크립트(`11-mysql-vip-cutover.sh`)에 반영해야 함.
+
 개선하려면 디스크 교체는 의미가 없고, NIC을 10GbE로 올리는 것만이 실질적인 해법이다. 지금 BMT 규모에서는 문제없지만 실 트래픽이 커지면 이 지점이 먼저 막힌다.
 
 ## 진행 상태
