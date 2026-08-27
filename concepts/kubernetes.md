@@ -249,7 +249,7 @@ ingress-nginx-controller-ccfdd7f8c-tqpmb   1/1     Running   chan08
 ```
 - 둘 다 "같은 라벨의 파드는 서로 다른 노드에"를 `requiredDuringSchedulingIgnoredDuringExecution`(강제)로 걸어놔서 항상 노드당 1개씩 유지된다. `replicas: 2`라 지금은 3대 중 2대(chan08, chan09)에만 있고 llm001은 비어있다 — anti-affinity는 "같은 노드에 몰리지 마라"는 규칙이지 "모든 노드에 하나씩 채워라"가 아니라서, replicas를 3으로 올리지 않는 한 세 번째 노드는 그냥 후보에서 빠진다.
 - coredns는 원래 기본값이 `preferredDuringScheduling`(권장, 강제 아님)이라 처음엔 우연히 둘 다 chan09에 몰려있었다 — chan09가 죽으면 클러스터 DNS가 통째로 끊기는 상태였다. `kubectl patch`로 `required`로 바꾸고 파드 하나를 지워서 강제로 재배치시켜 해결했다 (Deployment의 파드 템플릿을 바꿔도 이미 떠 있는 파드는 스스로 안 움직이므로, 최소 하나는 삭제해서 다시 뜨게 해야 새 규칙이 적용된다).
-- ingress-nginx-controller는 [`05-ingress.md`](../lessons/05-ingress.md)에서 처음부터 `required`로 만들었다.
+- ingress-nginx-controller는 [`05-1-ingress.md`](../lessons/05-1-ingress.md)에서 처음부터 `required`로 만들었다.
 
 ### 5. 임시 파드 — cm-acme-http-solver-*
 ```bash
