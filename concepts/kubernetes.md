@@ -333,6 +333,8 @@ Taint는 노드에 붙이는 "거부 딱지"다. `키=값:효과` 형태이고, 
 
 kubeadm은 컨트롤플레인 노드에 기본적으로 `node-role.kubernetes.io/control-plane:NoSchedule` taint를 건다(일반 파드가 못 올라오게). 우리도 처음엔 이걸 그대로 뒀다가, GPU 노드(llm001)에도 `nvidia.com/gpu=present:NoSchedule` taint를 걸어봤는데 — 노드가 3대뿐인 상황에서 컨트롤플레인 taint가 3대 전부에 붙어버리자 toleration 없는 일반 워크로드(cert-manager 등)가 클러스터 어디에도 못 뜨는 문제가 생겼다. 게다가 GPU taint는 애초에 불필요했다 — GPU 요청 파드는 `nvidia.com/gpu` 리소스를 가진 노드가 거기뿐이라 taint 없이도 자동으로 거기로만 갔기 때문. 결국 지금은 3대 다 taint를 없애고 완전 대칭으로 운영한다(자세한 경위는 [`06-llm-gpu-node.md`](../lessons/06-llm-gpu-node.md) 참고).
 
+**taint만 보고 넘어가면 놓치는 것 — 컨트롤플레인 승격은 라벨도 하나 끼워 넣는다.** kubeadm이 노드를 컨트롤플레인으로 만들 때 taint와 별개로 `node.kubernetes.io/exclude-from-external-load-balancers` 라벨도 자동으로 붙인다("컨트롤플레인은 외부 로드밸런서 대상에서 빼라"는 표준 관례). taint는 스케줄링(파드 배치)에만 영향을 주지만, 이 라벨은 MetalLB 같은 LoadBalancer 구현체가 "이 노드는 VIP 공지 후보에서 제외"하는 데 쓴다 — 전혀 다른 메커니즘이라 taint를 다 지워도 이 라벨은 그대로 남는다. 물리 노드 3대가 전부 컨트롤플레인인 이 클러스터에서는 이 라벨이 3대 전부에 붙어버려 MetalLB가 ingress VIP를 아무도 공지 못 하는 사고로 이어졌다 — 실제 장애와 해결 과정은 [`06-llm-gpu-node.md`의 관련 알려진 이슈](../lessons/06-llm-gpu-node.md#컨트롤플레인-승격-시-붙는-exclude-from-external-load-balancers-라벨이-metallb-vip를-통째로-죽임) 참고.
+
 ### Affinity / Anti-affinity — "같이 뜨게" 또는 "따로 뜨게"
 파드를 어디에 스케줄할지에 대한 세밀한 규칙. Anti-affinity로 "같은 라벨을 가진 파드는 서로 다른 노드에 하나씩만" 강제해서, ingress-nginx 파드 2개가 각각 다른 노드에 뜨도록 만들었다(둘 다 chan09에 몰리는 걸 방지).
 

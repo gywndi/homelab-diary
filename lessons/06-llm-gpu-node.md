@@ -12,7 +12,7 @@ GPU 리소스(`nvidia.com/gpu`)를 k8s가 직접 스케줄링 대상으로 관�
 - **containerd 기본 런타임을 nvidia로 직접 지정.** nvidia-container-runtime은 GPU를 요청하지 않는 일반 컨테이너에는 runc와 동일하게 동작하므로, 이 노드에 일반 파드가 같이 떠도 문제없다. RuntimeClass로 일반/GPU를 구분할 필요 없이 기본값 자체를 nvidia로 바꾸는 쪽이 더 단순하다.
 - **GPU 배타성은 taint가 아니라 리소스 요청으로 확보.** 처음엔 `nvidia.com/gpu` taint로 이 노드를 GPU 전용으로 막아뒀는데, 그러면 일반 워크로드가 이 노드를 아예 못 쓰게 되어 자원이 노는 문제가 있었다. 실제로는 `nvidia.com/gpu` 리소스를 실제로 가진 노드가 이 노드뿐이라, GPU를 요청하는 파드는 taint 없이도 스케줄러가 자동으로 여기로만 보낸다 — taint를 완전히 제거하고 라벨(`nvidia.com/gpu=true`, device-plugin의 nodeSelector용)만 남겼다. device-plugin의 toleration은 `operator: Exists`(모든 taint 허용)로 남겨뒀는데, 이 노드가 다시 컨트롤플레인 taint 같은 걸 받게 되더라도 매번 맞춰줄 필요 없게 하기 위함.
 - **컨트롤플레인 확장은 3대 전부를 스택 etcd로.** etcd는 과반수(quorum) 투표로 동작해서 짝수 대수는 오히려 손해다(2대는 1대 죽으면 과반 자체가 불가능해져서 1대짜리보다 나을 게 없음). 물리 노드가 정확히 3대뿐이라 "컨트롤플레인 전용 노드"를 따로 뺄 여유가 없어서, 3대 모두를 컨트롤플레인 겸 워커로 쓰는 kubeadm의 stacked etcd 토폴로지를 그대로 채택했다.
-- **컨트롤플레인 taint는 3대 전부 제거.** chan09/llm001까지 컨트롤플레인 taint가 붙으면 3대 전부가 "허가 없이는 못 들어오는" 노드가 되어버려서, toleration 없는 일반 워크로드(cert-manager, metallb-controller 등)가 클러스터 어디에도 못 뜨는 상태가 됐다. 처음엔 chan08만(원래 유일한 컨트롤플레인이었던 이력 + MySQL 소스를 겸하는 노드라는 이유로) taint를 남겨뒀으나, 3대가 이제 구조적으로 완전히 동일한 역할(컨트롤플레인+워커)이라 굳이 하나만 다르게 취급할 근거가 약해서 chan08의 taint도 마저 제거해 3대를 완전히 대칭으로 통일했다. llm001의 `nvidia.com/gpu` taint도 이후 제거했다 — GPU 배타성은 taint가 아니라 리소스 요청만으로 충분해서, taint를 남겨두는 건 일반 워크로드가 이 노드를 못 쓰게 막는 손해만 있었다 (위 설계 결정 참고). 결과적으로 3대 전부 taint가 없다.
+- **컨트롤플레인 taint는 3대 전부 제거.** chan09/llm001까지 컨트롤플레인 taint가 붙으면 3대 전부가 "허가 없이는 못 들어오는" 노드가 되어버려서, toleration 없는 일반 워크로드(cert-manager, metallb-controller 등)가 클러스터 어디에도 못 뜨는 상태가 됐다. 처음엔 chan08만(원래 유일한 컨트롤플레인이었던 이력 + MySQL 소스를 겸하는 노드라는 이유로) taint를 남겨뒀으나, 3대가 이제 구조적으로 완전히 동일한 역할(컨트롤플레인+워커)이라 굳이 하나만 다르게 취급할 근거가 약해서 chan08의 taint도 마저 제거해 3대를 완전히 대칭으로 통일했다. llm001의 `nvidia.com/gpu` taint도 이후 제거했다 — GPU 배타성은 taint가 아니라 리소스 요청만으로 충분해서, taint를 남겨두는 건 일반 워크로드가 이 노드를 못 쓰게 막는 손해만 있었다 (위 설계 결정 참고). 결과적으로 3대 전부 taint가 없다. kubeadm이 컨트롤플레인 승격 시 taint 말고 `node.kubernetes.io/exclude-from-external-load-balancers` 라벨도 같이 붙이는데, 이건 뒤늦게(MetalLB VIP가 통째로 죽인 뒤에야) 발견해서 별도로 제거했다 — 자세한 내용은 아래 "알려진 이슈" 참고.
 - **API 서버 VIP는 keepalived로, 기존 MySQL VIP와 같은 방식.** 별도 로드밸런서 없이 MetalLB(L2 ARP)와 원리가 다른, 호스트 native VRRP 방식을 그대로 재사용했다. VIP를 들고 있는 노드는 자기 자신의 apiserver(0.0.0.0:6443 바인딩)가 그대로 응답하므로 별도 프록시(haproxy 등)가 필요 없다 — 노드 하나가 죽으면 다음 우선순위 노드로 VIP가 넘어가고, 그 노드의 로컬 apiserver가 바로 이어받는다. 이 VIP는 애초에 [`02-k8s-cluster.md`](02-k8s-cluster.md)에서 컨트롤플레인을 처음 만들 때부터 `controlPlaneEndpoint`로 잡아뒀기 때문에, 이번에 컨트롤플레인을 늘릴 때는 인증서를 재발급하거나 클러스터 설정을 손댈 필요 없이 새 노드에 BACKUP 인스턴스만 추가하면 됐다.
 - **VM으로 etcd를 옮기지 않음.** etcd 데이터 디렉터리는 이미 nvme(OS 루트)에 있고 MySQL/KVM 데이터는 별도 물리 디스크(`/data`)에 있어서, 디스크 I/O 경합은 애초에 거의 없다. VM 이전은 CPU/메모리 격리는 얻지만 디스크 격리는 별도 디스크를 새로 안 주는 한 얻는 게 없고, 브리지 네트워킹 구성부터 다시 해야 해서 비용 대비 실익이 낮다고 판단했다.
 
@@ -80,6 +80,10 @@ sudo ufw allow from "$SUBNET" to any port 10259 proto tcp comment 'kube-schedule
 
 # keepalived VRRP (컨트롤플레인 API VIP)
 sudo ufw allow from "$SUBNET" proto vrrp
+
+# MetalLB memberlist (speaker 간 리더 선출용 가십 프로토콜)
+sudo ufw allow from "$SUBNET" to any port 7946 proto tcp comment 'MetalLB memberlist'
+sudo ufw allow from "$SUBNET" to any port 7946 proto udp comment 'MetalLB memberlist'
 
 sudo ufw reload
 ```
@@ -192,11 +196,21 @@ spec:
 
 ## 알려진 이슈
 
+### llm001 방화벽에 MetalLB memberlist 포트가 빠지면 speaker 간 통신이 불안정해짐
+`00-open-k8s-firewall-ports.sh`에 원래 7946/tcp·udp(MetalLB speaker의 memberlist 가십 포트)가 빠져 있었다. chan08/chan09는 이 포트가 `01-provision`의 `05-firewall-stage1.sh`로 이미 열려 있었지만, `01-provision`을 안 거치고 편입된 llm001은 이 포트가 막힌 채로 합류해서 다른 두 speaker가 llm001과 계속 `memberlist: Push/Pull with llm001 failed: dial tcp 10.5.5.10:7946: i/o timeout` 오류를 냈다. 이 자체가 VIP를 못 뜨게 만드는 직접 원인은 아니었지만(진짜 원인은 아래 exclude-from-external-load-balancers 라벨), memberlist가 불안정한 상태로 두면 리더 선출이 흔들릴 여지가 있어 위 스크립트에 포트를 추가했다.
+
 ### iptables를 직접 건드리면 UFW가 완전히 뚫림(반대로 잠김)
 `kubeadm reset` 후 CNI 정리 과정에서 `sudo iptables -F` 등으로 iptables를 직접 flush했더니 노드가 SSH/ping을 포함해 완전히 네트워크 단절됐다. UFW는 기본 정책을 DROP으로 걸어두고 그 위에 개별 ALLOW 규칙(SSH 등)을 얹는 방식인데, iptables를 직접 flush하면 ALLOW 규칙만 사라지고 DROP 기본 정책은 커널에 그대로 남는다. `/etc/ufw/`의 규칙 파일 자체는 디스크에 남아있어서 재부팅(또는 `sudo ufw reload`/`systemctl restart ufw`)하면 즉시 복구된다. **앞으로 UFW 쓰는 노드에서는 iptables를 직접 조작하지 말고 반드시 `ufw` 명령만 사용한다.**
 
 ### 컨트롤플레인 taint가 늘어나면 toleration 없는 워크로드가 전부 갈 곳을 잃음
 기존 워커(chan09)와 신규 노드(llm001)를 컨트롤플레인으로 승격시키면 kubeadm이 자동으로 `node-role.kubernetes.io/control-plane:NoSchedule` taint를 붙인다. 클러스터 노드 3대 전부에 이 taint가 붙으면, 이 taint에 대한 toleration이 없는 일반 워크로드(cert-manager, metallb-controller 등 — 원래는 taint 없는 워커에 떠 있었음)가 스케줄될 곳이 완전히 사라져 `Pending`으로 멈춘다. 3대 전부의 컨트롤플레인 taint를 제거해서 해결했다 (위 설계 결정 참고).
+
+### 컨트롤플레인 승격 시 붙는 exclude-from-external-load-balancers 라벨이 MetalLB VIP를 통째로 죽임
+kubeadm은 노드를 컨트롤플레인으로 승격시킬 때(`kubeadm init phase mark-control-plane`) taint 말고 라벨도 하나 더 붙인다 — `node.kubernetes.io/exclude-from-external-load-balancers`. "컨트롤플레인은 외부 로드밸런서 대상에서 빼라"는 표준 관례용 라벨인데, MetalLB가 이 라벨이 붙은 노드를 L2 공지(announce) 후보에서 아예 제외한다. chan09/llm001이 컨트롤플레인으로 승격되면서 이 라벨도 같이 따라붙었고, 물리 노드가 3대뿐이라 전부 컨트롤플레인인 이 클러스터에서는 **3대 전부가 후보에서 빠져버려 ingress VIP(10.5.5.2)를 아무도 공지하지 못하는 상태**가 됐다 — MetalLB 설정(IPAddressPool/L2Advertisement)도, 노드 상태(Ready)도, 방화벽도 전부 멀쩡한데 `kubectl -n metallb-system get servicel2status`에 아무 것도 안 뜨고 도메인 전체가 응답하지 않는 증상으로 나타났다. taint와 마찬가지로 3대 전부의 라벨을 제거해서 해결했다:
+```bash
+kubectl label node chan08 chan09 llm001 node.kubernetes.io/exclude-from-external-load-balancers-
+```
+컨트롤플레인 taint를 제거할 때 이 라벨은 별개라 같이 지워지지 않는다는 점이 함정이다 — 컨트롤플레인 승격 후 스케줄링(taint)만 확인하고 LoadBalancer 공지 대상(라벨)은 놓치기 쉽다.
 
 ### 컨트롤플레인을 고정 IP로 시작했다면 이 문서의 join 절차만으로는 부족함
 이 문서의 join 절차는 컨트롤플레인이 처음부터 VIP로 시작했다고 가정한다(현재 [`02-k8s-cluster.md`](02-k8s-cluster.md) 기준). 고정 IP로 초기화한 클러스터에 뒤늦게 VIP를 끼워 넣으려면 인증서 재발급 등 훨씬 번거로운 절차가 추가로 필요한데, 그 내용과 실제로 이 문제를 겪었던 이력은 [`02-k8s-cluster.md`의 "알려진 이슈: 고정 IP로 시작하면 나중에 힘들다"](02-k8s-cluster.md#알려진-이슈-고정-ip로-시작하면-나중에-힘들다)에 정리해뒀다.
