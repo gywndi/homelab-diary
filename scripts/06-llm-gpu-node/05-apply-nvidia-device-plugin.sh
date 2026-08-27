@@ -5,7 +5,7 @@
 # 살아남도록 와일드카드 toleration을 쓴다 — 이 노드가 나중에 컨트롤플레인으로
 # 승격되는 등 taint 구성이 바뀌어도 재조정 없이 계속 떠 있게 하기 위함.
 #
-# 사용법: ./07-apply-nvidia-device-plugin.sh
+# 사용법: ./05-apply-nvidia-device-plugin.sh
 
 set -euo pipefail
 

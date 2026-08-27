@@ -6,8 +6,8 @@
 # 스케줄되고, taint를 걸면 오히려 일반 워크로드가 이 노드를 못 쓰게
 # 막는 손해만 있다.
 #
-# 사용법: ./06-label-gpu-node.sh <노드 이름>
-#   예: ./06-label-gpu-node.sh llm001
+# 사용법: ./04-label-gpu-node.sh <노드 이름>
+#   예: ./04-label-gpu-node.sh llm001
 
 set -euo pipefail
 

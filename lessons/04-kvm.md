@@ -11,8 +11,8 @@ Kubernetes로 옮기기 어려운 워크로드(특정 OS 필요, 컨테이너화
 # 하이퍼바이저(qemu-kvm)와 관리 데몬(libvirt), VM 생성 도구 설치
 sudo apt-get install -y qemu-kvm libvirt-daemon-system libvirt-clients virtinst bridge-utils
 
-# 작업 계정을 libvirt/kvm 그룹에 추가 (sudo 없이 virsh 사용 가능)
-sudo usermod -aG libvirt,kvm chan
+# 작업 계정을 libvirt/kvm 그룹에 추가 (sudo 없이 virsh 사용 가능, 계정명은 실행한 사람 계정으로 자동 감지)
+sudo usermod -aG libvirt,kvm "$USER"
 
 # libvirt 데몬 활성화 + 즉시 시작
 sudo systemctl enable --now libvirtd

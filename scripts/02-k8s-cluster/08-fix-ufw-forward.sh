@@ -3,7 +3,7 @@
 # 막혀 CoreDNS 등이 API 서버에 도달하지 못한다. ACCEPT로 변경.
 # 인바운드 규칙(10.5.5.0/24 제한)에는 영향 없음 — FORWARD 체인만 변경.
 #
-# 사용법: sudo ./06-fix-ufw-forward.sh (양쪽 노드 모두 실행)
+# 사용법: sudo ./08-fix-ufw-forward.sh (모든 노드에서 실행)
 
 set -euo pipefail
 

@@ -10,7 +10,7 @@
    - SSH, sudo, 패키지, 타임존, 방화벽, 데이터 디스크
    - 문서 [바로가기](lessons/01-provision.md) · 스크립트 [바로가기](scripts/01-provision/)
 2. Kubernetes 클러스터
-   - 2노드, Flannel CNI
+   - 2노드, Flannel CNI, 컨트롤플레인은 처음부터 keepalived VIP를 진입점으로 사용
    - 문서 [바로가기](lessons/02-k8s-cluster.md) · 스크립트 [바로가기](scripts/02-k8s-cluster/)
 3. MySQL active/standby
    - semi-sync + keepalived VIP

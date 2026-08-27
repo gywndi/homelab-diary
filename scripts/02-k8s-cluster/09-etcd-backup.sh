@@ -10,9 +10,9 @@
 # 못 쓴다. 대신 etcd 파드의 hostPath 볼륨(/var/lib/etcd, 호스트와 그대로
 # 매핑됨)에 스냅샷을 떠서 호스트 쪽에서 직접 꺼내는 방식을 쓴다.
 #
-# 사용법: ./07-etcd-backup.sh [보관 개수, 기본 7]
-#   ./07-etcd-backup.sh
-#   ./07-etcd-backup.sh 14
+# 사용법: ./09-etcd-backup.sh [보관 개수, 기본 7]
+#   ./09-etcd-backup.sh
+#   ./09-etcd-backup.sh 14
 
 set -euo pipefail
 

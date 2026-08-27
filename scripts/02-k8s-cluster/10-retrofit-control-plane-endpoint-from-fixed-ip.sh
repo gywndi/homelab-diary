@@ -1,15 +1,19 @@
 #!/bin/bash
-# 단일 컨트롤플레인으로 초기화된 클러스터에 공유 진입점(VIP)을 사후 반영
+# [복구용] 처음에 고정 IP로 초기화한 클러스터에 VIP 공유 진입점을 사후 반영
 #
-# kubeadm은 처음 init할 때 --control-plane-endpoint 없이 만든 클러스터에는
-# 컨트롤플레인을 추가로 join시키는 걸 거부한다. ClusterConfiguration에
-# controlPlaneEndpoint와 apiserver certSAN을 추가하고, 이미 떠 있는
-# apiserver 인증서를 그 SAN을 포함해서 재발급한다.
+# 04-init-control-plane.sh를 이미 --control-plane-endpoint 없이(고정 IP만으로) 실행해버린
+# 경우에만 쓴다. 정상 절차(04→05→06)를 그대로 따라왔다면 이 스크립트는 필요 없다.
+#
+# kubeadm은 --control-plane-endpoint 없이 init된 클러스터에는 컨트롤플레인을 추가로
+# join시키는 걸 거부한다. ClusterConfiguration에 controlPlaneEndpoint와 apiserver
+# certSAN을 추가하고, 이미 떠 있는 apiserver 인증서를 그 SAN을 포함해서 재발급해야
+# 한다 — 왜 이 방법 대신 처음부터 VIP로 시작해야 하는지는 lessons/02-k8s-cluster.md의
+# "알려진 이슈: 고정 IP로 시작하면 나중에 힘들다" 참고.
 #
 # 기존 컨트롤플레인(예: chan08)에서만 1회 실행.
 #
-# 사용법: sudo ./03-add-control-plane-endpoint.sh <VIP>
-#   예: ./03-add-control-plane-endpoint.sh 10.5.5.3
+# 사용법: sudo ./10-retrofit-control-plane-endpoint-from-fixed-ip.sh <VIP>
+#   예: ./10-retrofit-control-plane-endpoint-from-fixed-ip.sh 10.5.5.3
 
 set -euo pipefail
 
@@ -56,8 +60,15 @@ sed -i "s#https://${SELF_IP}:6443#https://${VIP}:6443#" /etc/kubernetes/admin.co
 cp -f /etc/kubernetes/admin.conf "$HOME/.kube/config"
 chown "$(logname)":"$(logname)" "$HOME/.kube/config" || true
 
+echo "== cluster-info(kube-public)도 VIP로 갱신 (안 하면 join 명령이 계속 고정 IP를 가리킴) =="
+kubectl -n kube-public get cm cluster-info -o jsonpath='{.data.kubeconfig}' > /tmp/cluster-info-kubeconfig.yaml
+sed -i "s#server: https://${SELF_IP}:6443#server: https://${VIP}:6443#" /tmp/cluster-info-kubeconfig.yaml
+kubectl -n kube-public create cm cluster-info \
+  --from-file=kubeconfig=/tmp/cluster-info-kubeconfig.yaml \
+  --dry-run=client -o yaml | kubectl apply -f -
+
 echo "== 확인 =="
 openssl x509 -in /etc/kubernetes/pki/apiserver.crt -noout -text | grep -A2 'Subject Alternative Name'
 kubectl get nodes
 
-echo "완료: controlPlaneEndpoint=${VIP}:6443 반영. 다음은 04-setup-apiserver-vip-keepalived.sh로 VIP를 띄울 것"
+echo "완료: controlPlaneEndpoint=${VIP}:6443 반영. 다음은 05-setup-apiserver-vip-keepalived.sh로 VIP를 띄울 것"
