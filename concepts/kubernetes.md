@@ -4,32 +4,21 @@ Kubernetes를 처음부터 배우면서 이 클러스터를 만들었다. 새 �
 
 ## 전체 구조
 
+한 장에 다 넣으면 복잡해서, 실제로 자주 마주치는 흐름 4가지로 나눠서 본다.
+
+### 1. k8s 자체 요소 관계 (컨트롤플레인 + 인프라 배관)
+
 ```mermaid
 flowchart TB
-    subgraph CLIENTS["클라이언트"]
-        KUBECTL["kubectl"]
-        WEB["인터넷 (80/443)"]
-    end
-
-    APIVIP["API 서버 VIP 10.5.5.3<br/>(keepalived, VRRP)"]
-    INGVIP["Ingress VIP 10.5.5.2<br/>(MetalLB, ARP)"]
-
-    KUBECTL --> APIVIP
-    WEB --> INGVIP
-
-    subgraph CP["컨트롤플레인 (3대 stacked etcd, 쿼럼 3)"]
+    subgraph CP["컨트롤플레인 (stacked etcd, 쿼럼 3)"]
         direction LR
         CP8["chan08<br/>etcd+apiserver+scheduler+controller-manager"]
         CP9["chan09<br/>etcd+apiserver+scheduler+controller-manager"]
         CP10["llm001<br/>etcd+apiserver+scheduler+controller-manager"]
-        CP8 <-.raft.-> CP9
-        CP9 <-.raft.-> CP10
-        CP8 <-.raft.-> CP10
+        CP8 <-. raft .-> CP9
+        CP9 <-. raft .-> CP10
+        CP8 <-. raft .-> CP10
     end
-
-    APIVIP -. 우선순위 최고 노드 .-> CP8
-    APIVIP -. 장애시 .-> CP9
-    APIVIP -. 장애시 .-> CP10
 
     subgraph DS["모든 노드에 하나씩 (DaemonSet)"]
         direction LR
@@ -38,41 +27,56 @@ flowchart TB
         SPEAKER["speaker<br/>(VIP ARP 응답)"]
     end
 
-    INGVIP -. 리더 노드가 응답 .-> SPEAKER
-    SPEAKER --> PROXY
-
-    subgraph WORKLOAD["일반 워크로드 (지금 배치 상태)"]
-        direction LR
-        NGINX["ingress-nginx x2<br/>(chan08, chan09)"]
-        DNS["coredns x2<br/>(chan08, chan09)"]
-        CERTM["cert-manager x3<br/>(chan09)"]
-        MLBC["metallb-controller<br/>(chan09)"]
-    end
-
-    PROXY --> NGINX
-    NGINX -- Host 헤더 라우팅 --> BACKEND["클러스터 밖 백엔드 서버들"]
-    CERTM <-. ACME HTTP-01 .-> LE["Let's Encrypt"]
-
-    subgraph HOSTNATIVE["호스트 native (k8s 밖, keepalived로 별도 관리)"]
-        direction LR
-        MYSQLVIP["MySQL VIP 10.5.5.210 / .4<br/>chan08=소스, chan09=레플리카"]
-        KVMH["KVM<br/>(chan08, chan09)"]
-    end
-
-    subgraph GPUZONE["GPU 전용"]
-        direction LR
-        DEVPLUGIN["nvidia-device-plugin<br/>(llm001, nodeSelector)"]
-        CARD["RTX 5060 Ti"]
-        DEVPLUGIN --> CARD
-    end
+    CP -- "스케줄링 결정, 상태 동기화" --> DS
 ```
+컨트롤플레인 3대는 완전히 대칭이고 etcd raft로 쿼럼을 유지한다. DaemonSet 층(flannel/kube-proxy/speaker)은 모든 노드에 깔린 인프라 배관으로, 컨트롤플레인의 결정을 각 노드에서 실제로 실행한다.
 
-- 클라이언트는 목적에 따라 다른 VIP로 들어온다 — kubectl은 API 서버 VIP(keepalived), 웹 트래픽은 Ingress VIP(MetalLB). 두 VIP는 메커니즘 자체가 다르다(위 "컨트롤플레인 HA"와 "MetalLB" 절 참고).
-- 컨트롤플레인 3대는 완전히 대칭이고 etcd raft로 쿼럼을 유지한다.
-- DaemonSet 층(flannel/kube-proxy/speaker)은 모든 노드에 깔린 인프라 배관이다 — speaker가 ARP로 문을 열어주면 kube-proxy가 실제 파드로 분산한다.
-- 일반 워크로드는 taint가 없어 이론상 3대 어디든 갈 수 있지만, 지금은 실제로 chan08/chan09에만 있다(파드가 새로 만들어질 때만 재배치되기 때문 — 위 "3. Deployment, toleration 없음" 참고).
-- MySQL/KVM은 k8s 리소스가 아니라 호스트에 직접 떠 있는 별개 층이라 점선 박스로 분리했다.
-- GPU 쪽만 리소스 제약으로 llm001에 고정된다.
+### 2. 인터넷 → nginx 처리 (Ingress 트래픽 경로)
+
+```mermaid
+flowchart TB
+    WEB["인터넷 (80/443)"] --> INGVIP["Ingress VIP 10.5.5.2<br/>(MetalLB)"]
+    INGVIP -. "리더 노드가 ARP 응답" .-> SPEAKER["speaker"]
+    SPEAKER --> PROXY["kube-proxy<br/>(어느 노드의 nginx로 보낼지 분산)"]
+    PROXY --> NGINX1["ingress-nginx (chan08)"]
+    PROXY --> NGINX2["ingress-nginx (chan09)"]
+    NGINX1 -- "Host 헤더 라우팅" --> BACKEND["클러스터 밖 백엔드 서버들"]
+    NGINX2 -- "Host 헤더 라우팅" --> BACKEND
+    CERTM["cert-manager (chan09)"] -. "인증서 발급/갱신" .-> NGINX1
+    CERTM -. "인증서 발급/갱신" .-> NGINX2
+    CERTM <-. "ACME HTTP-01" .-> LE["Let's Encrypt"]
+```
+speaker가 ARP로 VIP를 받아주면, 그 다음은 순수 k8s Service 경로(kube-proxy → 실제 nginx 파드)를 탄다. cert-manager는 이 경로와 별도로 인증서만 채워 넣는다.
+
+### 3. kubectl 명령 제어 흐름
+
+```mermaid
+flowchart TB
+    KUBECTL["kubectl"] --> APIVIP["API 서버 VIP 10.5.5.3<br/>(keepalived)"]
+    APIVIP -. "우선순위 최고 노드" .-> A8["chan08 apiserver"]
+    APIVIP -. "장애시" .-> A9["chan09 apiserver"]
+    APIVIP -. "장애시" .-> A10["llm001 apiserver"]
+    A8 --> ETCD["etcd (raft 합의)"]
+    A9 --> ETCD
+    A10 --> ETCD
+    ETCD -- "상태 변경 감지" --> SCHED["scheduler / controller-manager"]
+    SCHED -- "파드 배치/재조정 지시" --> KUBELET["각 노드 kubelet"]
+```
+API 서버 VIP는 MetalLB(ARP)가 아니라 keepalived(VRRP)라 1번의 speaker와는 완전히 다른 메커니즘이다. kubectl이 어느 apiserver에 붙든 결국 같은 etcd를 보므로 결과는 동일하다.
+
+### 4. GPU 업무 처리 흐름
+
+```mermaid
+flowchart TB
+    POD["nvidia.com/gpu: 1 요청하는 파드"] --> SCHED["scheduler"]
+    SCHED -- "그 리소스 가진 노드가 llm001뿐" --> LLM["llm001에 배치"]
+    LABEL["nvidia.com/gpu=true 라벨"] -. "device-plugin의 nodeSelector 매칭" .-> DEVPLUGIN
+    DEVPLUGIN["nvidia-device-plugin<br/>(DaemonSet, llm001)"] -- "GPU를 스케줄 가능한 리소스로 등록" --> APISERVER["apiserver (allocatable 갱신)"]
+    LLM --> CONTAINERD["containerd (기본 런타임 = nvidia)"]
+    CONTAINERD --> RUNTIME["nvidia-container-runtime"]
+    RUNTIME --> CARD["RTX 5060 Ti"]
+```
+taint 없이도 리소스 요청만으로 llm001에 고정된다는 게 핵심 — device-plugin이 먼저 apiserver에 "이 노드엔 GPU 1개 있다"고 등록해둬야, 그걸 요청하는 파드가 스케줄될 수 있다.
 
 ## 파드별 역할과 배치 이유
 
