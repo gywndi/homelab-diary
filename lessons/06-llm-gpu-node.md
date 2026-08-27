@@ -187,8 +187,8 @@ sudo systemctl restart keepalived
 
 ### 컨트롤플레인으로 join
 - 설명: 워커가 아니라 컨트롤플레인(추가 apiserver+etcd 멤버)으로 합류시킨다. 각 파라미터의 의미:
-  - `--token` : 노드가 클러스터에 처음 인증할 때 쓰는 1회성 부트스트랩 토큰 (기본 24시간 TTL)
-  - `--discovery-token-ca-cert-hash` : 접속하려는 apiserver가 진짜 이 클러스터의 CA로 서명됐는지 검증하는 해시 (중간자 공격 방지)
+  - `--token` : 노드가 클러스터에 처음 인증할 때 쓰는 1회성 부트스트랩 토큰 (기본 24시간 TTL). 기존 컨트롤플레인에서 `kubeadm token create`로 매번 새로 발급하며, 클러스터의 etcd에 Secret으로 저장된다.
+  - `--discovery-token-ca-cert-hash` : 접속하려는 apiserver가 진짜 이 클러스터의 CA로 서명됐는지 검증하는 해시 (중간자 공격 방지). 새로 만드는 값이 아니라 클러스터의 루트 CA 인증서(`/etc/kubernetes/pki/ca.crt`)에서 그대로 계산되는 고정값이라, CA를 재발급하지 않는 한 토큰을 몇 번을 새로 받아도 이 해시는 항상 같다 (실제로 chan09/llm001 join 때 토큰은 매번 달랐지만 해시는 `sha256:22a8bc3a...`로 동일했다).
   - `--control-plane` : 워커가 아니라 컨트롤플레인(추가 apiserver+etcd 멤버)으로 합류하겠다는 플래그
   - `--certificate-key` : 기존 컨트롤플레인들의 인증서를 새 노드로 안전하게 복사해오는 임시 대칭키 (`kubeadm init phase upload-certs`로 발급, 기본 2시간 TTL)
   - `--apiserver-advertise-address` : 이 노드의 apiserver가 자기 자신의 IP로 클러스터에 알리는 주소 (멀티 NIC 환경에서 명시 필요)
