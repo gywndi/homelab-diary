@@ -1,6 +1,6 @@
 # StarRocks shared-data 배포 (완료)
 
-> 이 문서는 초안이다. 검증까지 끝나면 `lessons/`로 옮겨 다듬는다. 전제가 되는 스토리지 레이어는 [Ceph 스토리지 레이어 도입](ceph-storage-layer.md) 참고 — RGW(오브젝트 스토리지)가 이미 배포되어 있어야 한다.
+> 이 문서는 초안이다. 검증까지 끝나면 `lessons/`로 옮겨 다듬는다. 전제가 되는 스토리지 레이어는 [Ceph 스토리지 레이어 도입](ceph-storage-layer.md) 참고 — RGW(오브젝트 스토리지)가 이미 배포되어 있어야 한다. 아키텍처 배경 지식은 [StarRocks 아키텍처](starrocks-architecture.md) 참고.
 
 컴퓨팅/스토리지 분리 구성을 실제로 테스트해보기 위해, RGW 위에 StarRocks FE 1 + CN 1을 shared-data 모드로 배포했다. KVM을 RBD로 전환하는 작업보다 이걸 먼저 진행했다 — 애초에 Ceph 도입의 출발점이 StarRocks 테스트였기 때문이다.
 
