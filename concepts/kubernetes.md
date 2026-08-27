@@ -6,7 +6,7 @@ Kubernetes를 처음부터 배우면서 이 클러스터를 만들었다. 새 �
 
 한 장에 다 넣으면 복잡해서, 실제로 자주 마주치는 흐름 4가지로 나눠서 본다.
 
-### 1. k8s 자체 요소 관계 (컨트롤플레인 + 인프라 배관)
+### 1. k8s 자체 요소 관계 (컨트롤플레인 + 인프라 구성요소)
 
 ```mermaid
 flowchart TB
@@ -35,7 +35,7 @@ flowchart TB
     DNS1 -- "실제 ClusterIP로 응답" --> PODNS
     DNS2 -- "실제 ClusterIP로 응답" --> PODNS
 ```
-컨트롤플레인 3대는 완전히 대칭이고 etcd raft로 쿼럼을 유지한다. DaemonSet 층(flannel/kube-proxy/speaker)은 모든 노드에 깔린 인프라 배관으로, 컨트롤플레인의 결정을 각 노드에서 실제로 실행한다. CoreDNS는 DaemonSet이 아니라 Deployment(x2, anti-affinity로 노드당 1개)라서 위 DaemonSet 그룹과 분리해서 그렸다 — 파드가 이름으로 뭔가를 찾을 때도 결국 kube-proxy를 거쳐 coredns 파드로 분산된다(2번 다이어그램의 nginx 트래픽과 같은 경로 패턴).
+컨트롤플레인 3대는 완전히 대칭이고 etcd raft로 쿼럼을 유지한다. DaemonSet 층(flannel/kube-proxy/speaker)은 모든 노드에 깔린 인프라 구성요소로, 컨트롤플레인의 결정을 각 노드에서 실제로 실행한다. CoreDNS는 DaemonSet이 아니라 Deployment(x2, anti-affinity로 노드당 1개)라서 위 DaemonSet 그룹과 분리해서 그렸다 — 파드가 이름으로 뭔가를 찾을 때도 결국 kube-proxy를 거쳐 coredns 파드로 분산된다(2번 다이어그램의 nginx 트래픽과 같은 경로 패턴).
 
 ### 2. 인터넷 → nginx 처리 (Ingress 트래픽 경로)
 
