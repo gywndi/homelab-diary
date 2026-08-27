@@ -2,6 +2,78 @@
 
 Kubernetes를 처음부터 배우면서 이 클러스터를 만들었다. 새 컴포넌트를 추가할 때마다 그때 필요했던 개념을 여기에 추가한다 — 교과서적 정의보다 "우리 클러스터에서 실제로 이게 왜 필요했는지"를 우선한다.
 
+## 전체 구조
+
+```mermaid
+flowchart TB
+    subgraph CLIENTS["클라이언트"]
+        KUBECTL["kubectl"]
+        WEB["인터넷 (80/443)"]
+    end
+
+    APIVIP["API 서버 VIP 10.5.5.3<br/>(keepalived, VRRP)"]
+    INGVIP["Ingress VIP 10.5.5.2<br/>(MetalLB, ARP)"]
+
+    KUBECTL --> APIVIP
+    WEB --> INGVIP
+
+    subgraph CP["컨트롤플레인 (3대 stacked etcd, 쿼럼 3)"]
+        direction LR
+        CP8["chan08<br/>etcd+apiserver+scheduler+controller-manager"]
+        CP9["chan09<br/>etcd+apiserver+scheduler+controller-manager"]
+        CP10["llm001<br/>etcd+apiserver+scheduler+controller-manager"]
+        CP8 <-.raft.-> CP9
+        CP9 <-.raft.-> CP10
+        CP8 <-.raft.-> CP10
+    end
+
+    APIVIP -. 우선순위 최고 노드 .-> CP8
+    APIVIP -. 장애시 .-> CP9
+    APIVIP -. 장애시 .-> CP10
+
+    subgraph DS["모든 노드에 하나씩 (DaemonSet)"]
+        direction LR
+        FLANNEL["flannel<br/>(파드 네트워크)"]
+        PROXY["kube-proxy<br/>(Service 라우팅)"]
+        SPEAKER["speaker<br/>(VIP ARP 응답)"]
+    end
+
+    INGVIP -. 리더 노드가 응답 .-> SPEAKER
+    SPEAKER --> PROXY
+
+    subgraph WORKLOAD["일반 워크로드 (지금 배치 상태)"]
+        direction LR
+        NGINX["ingress-nginx x2<br/>(chan08, chan09)"]
+        DNS["coredns x2<br/>(chan08, chan09)"]
+        CERTM["cert-manager x3<br/>(chan09)"]
+        MLBC["metallb-controller<br/>(chan09)"]
+    end
+
+    PROXY --> NGINX
+    NGINX -- Host 헤더 라우팅 --> BACKEND["클러스터 밖 백엔드 서버들"]
+    CERTM <-. ACME HTTP-01 .-> LE["Let's Encrypt"]
+
+    subgraph HOSTNATIVE["호스트 native (k8s 밖, keepalived로 별도 관리)"]
+        direction LR
+        MYSQLVIP["MySQL VIP 10.5.5.210 / .4<br/>chan08=소스, chan09=레플리카"]
+        KVMH["KVM<br/>(chan08, chan09)"]
+    end
+
+    subgraph GPUZONE["GPU 전용"]
+        direction LR
+        DEVPLUGIN["nvidia-device-plugin<br/>(llm001, nodeSelector)"]
+        CARD["RTX 5060 Ti"]
+        DEVPLUGIN --> CARD
+    end
+```
+
+- 클라이언트는 목적에 따라 다른 VIP로 들어온다 — kubectl은 API 서버 VIP(keepalived), 웹 트래픽은 Ingress VIP(MetalLB). 두 VIP는 메커니즘 자체가 다르다(위 "컨트롤플레인 HA"와 "MetalLB" 절 참고).
+- 컨트롤플레인 3대는 완전히 대칭이고 etcd raft로 쿼럼을 유지한다.
+- DaemonSet 층(flannel/kube-proxy/speaker)은 모든 노드에 깔린 인프라 배관이다 — speaker가 ARP로 문을 열어주면 kube-proxy가 실제 파드로 분산한다.
+- 일반 워크로드는 taint가 없어 이론상 3대 어디든 갈 수 있지만, 지금은 실제로 chan08/chan09에만 있다(파드가 새로 만들어질 때만 재배치되기 때문 — 위 "3. Deployment, toleration 없음" 참고).
+- MySQL/KVM은 k8s 리소스가 아니라 호스트에 직접 떠 있는 별개 층이라 점선 박스로 분리했다.
+- GPU 쪽만 리소스 제약으로 llm001에 고정된다.
+
 ## 파드별 역할과 배치 이유
 
 같은 파드라도 "왜 그 노드에 떴는지"는 각자 다른 규칙 때문이다. 실제 설정값 기준으로, 각 항목마다 그걸 직접 조회하는 명령과 결과를 같이 둔다. 도메인/Ingress 이름은 실제 값 대신 `app1.example.com` 식으로 치환했다.
