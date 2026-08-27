@@ -55,7 +55,7 @@ flowchart TB
 - **AppArmor 로컬 오버라이드도 같이 옮겨야 한다.** Ubuntu MySQL 패키지는 `/etc/apparmor.d/local/usr.sbin.mysqld`에 datadir 경로를 화이트리스트로 걸어둔다. 새 경로를 추가하지 않으면 mysqld가 파일 접근을 거부당하며 죽는다.
 - **되돌릴 수 없는 원격 명령은 Claude Code 자동 모드 분류기가 막는다.** `wipefs` 같은 명령은 세션 권한으로 승인해도 별도 분류기가 한 번 더 막아서, 프로젝트 로컬 설정(`.claude/settings.local.json`)에 해당 호스트로의 ssh/scp를 허용 규칙으로 추가해야 진행할 수 있었다.
 - **Rook 1.20부터 CSI 드라이버가 별도 오퍼레이터로 분리됐다.** `crds.yaml` → `common.yaml` → `operator.yaml` 순서만 알고 있었는데, 실제로는 그 사이에 `csi-operator.yaml`(ceph-csi-operator의 `OperatorConfig`/`Driver` CRD)을 먼저 적용해야 한다. 빠뜨리면 "no matches for kind Driver/OperatorConfig" 에러가 난다. 공식 quickstart를 다시 확인하고서야 알았다.
-- **`kubectl apply`를 CephCluster CR에 두 번 실행했더니 reconcile이 멈췄다.** 리소스 버전 충돌(`the object has been modified`) 이후 operator가 mon-a만 띄운 채 다음 mon으로 진행을 안 했다 — 에러는 안 나고 그냥 헬스체크 로그만 반복. `kubectl rollout restart deployment/rook-ceph-operator`로 reconcile을 처음부터 다시 돌리니 정상적으로 mon-b/c, OSD까지 이어졌다.
+- **operator reconcile이 에러 없이 멈추는 일이 반복됐다.** CephCluster CR을 두 번 apply했을 때(리소스 버전 충돌 `the object has been modified` 발생 이후 mon-a만 뜨고 멈춤), 그리고 CephBlockPool 생성 때도(로그에 "successfully configured" 이벤트까지 찍히는데 실제 풀은 안 생기고 그대로 멈춤) 똑같은 패턴이 나왔다 — 에러 로그 없이 조용히 진행이 끊긴다. 두 번 다 `kubectl rollout restart deployment/rook-ceph-operator`로 reconcile을 처음부터 다시 돌리니 정상 진행됐다. Rook 1.20 operator의 재현되는 특성으로 보이니, 진행이 몇 분 이상 안 보이면 우선 operator 재시작부터 시도할 것.
 - **`kubectl wait`는 매칭되는 리소스가 하나도 없으면 기다리지 않고 즉시 에러를 낸다.** mon/osd 파드가 아직 생성되기 전에 `kubectl wait -l app=...`를 걸면 "no matching resources found"로 바로 실패한다 — 파드가 생기는 것부터 폴링한 뒤에 `wait`를 걸어야 한다.
 
 ## 진행 상태
