@@ -1,0 +1,30 @@
+# CephObjectStore(RGW) — StarRocks shared-data가 S3 API로 접근할 오브젝트 스토어
+apiVersion: ceph.rook.io/v1
+kind: CephObjectStore
+metadata:
+  name: starrocks-store
+  namespace: rook-ceph
+spec:
+  metadataPool:
+    failureDomain: host
+    replicated:
+      size: 3
+      requireSafeReplicaSize: true
+  dataPool:
+    failureDomain: host
+    replicated:
+      size: 3
+      requireSafeReplicaSize: true
+    parameters:
+      bulk: "true"
+  preservePoolsOnDelete: false
+  gateway:
+    # Ceph RGW 기본 포트. 80/443은 ingress-nginx가 쓰므로 충돌 방지
+    port: 7480
+    instances: 1
+    priorityClassName: system-cluster-critical
+  healthCheck:
+    startupProbe:
+      disabled: false
+    readinessProbe:
+      disabled: false
