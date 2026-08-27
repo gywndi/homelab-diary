@@ -70,6 +70,30 @@ flowchart TB
 - **VIP(`10.5.5.6`, `10.5.5.4`)가 라우터 DHCP 임대 대역과 안 겹치는지 아직 미확인** — `internal/ip-inventory.md`에 이미 있던 TODO 항목이고 이번 작업으로 새로 생긴 문제는 아니다.
 - HEALTH_WARN(insecure key type 경고)은 무해하지만 커널 6.8에서는 해소 불가(7.0+ 필요) — 낮은 우선순위로 그냥 둔다.
 
+## 성능 측정 및 병목 분석 (2026-08-28)
+
+BMT 목적에 실제로 쓸 만한 성능인지 확인하기 위해 세 계층을 각각 측정했다.
+
+| 항목 | 결과 |
+|---|---|
+| Ceph 쓰기 (`rados bench`, 4MB obj, 16 threads, rbd-pool) | 86 MB/s, 평균 지연 738ms |
+| Ceph 순차/랜덤 읽기 | 161 MB/s, 평균 지연 388ms |
+| MySQL (`sysbench oltp_read_write`, 8 threads, 40만 행) | 125 TPS, 평균 지연 64ms, 95th 137ms |
+| StarRocks 100만 행 로드 | ~3초 |
+| StarRocks 집계 쿼리 (COUNT/GROUP BY/범위 필터, 100만 행) | 전부 30ms 미만 (서버 타임스탬프로 측정, 클라이언트 파드 기동 오버헤드 제외) |
+
+**병목은 디스크가 아니라 1GbE 네트워크였다.** 하나씩 배제해서 좁혔다:
+- 디스크 하드웨어: 3노드 전부 SSD/NVMe(회전형 없음) — 후보에서 제외
+- OSD 자체 쓰기 지연: `ceph osd perf` 기준 commit/apply 지연 1~2ms — 매우 빠름, 후보에서 제외
+- 네트워크 링크 상태: `iperf3`로 chan08↔chan09 실측 941Mbps, 재전송 0 — 링크 자체는 완전 건강
+- **네트워크 대역폭 상한: 3노드 전부 물리 NIC이 1GbE(1000Mb/s)** — 이게 진짜 병목
+
+size=3 replication 쓰기는 클라이언트→primary OSD로 들어온 뒤 primary가 나머지 2개 replica로 다시 내보내야 완료 처리된다. primary 노드의 NIC 하나가 "받는 트래픽 + 내보내는 트래픽 ×2"를 전부 같은 1Gbps 파이프로 처리해야 해서, 원본 링크 속도(iperf3 실측 117MB/s)보다 실제 쓰기 처리량(86MB/s)이 낮고 지연도 커지는 게 정확히 설명된다.
+
+StarRocks 집계 쿼리가 Ceph 자체는 느린데도 30ms 미만으로 빠른 건 CN의 로컬 데이터 캐시 덕분 — "콜드 데이터는 네트워크/Ceph 속도에 매여있고, 캐시된 데이터는 빠르다"는 shared-data 구조의 트레이드오프가 실측으로 확인됐다.
+
+개선하려면 디스크 교체는 의미가 없고, NIC을 10GbE로 올리는 것만이 실질적인 해법이다. 지금 BMT 규모에서는 문제없지만 실 트래픽이 커지면 이 지점이 먼저 막힌다.
+
 ## 진행 상태
 
 - [x] **MySQL/디스크 정리 완료 (2026-08-27)** — chan08은 mysqldump 안전 백업 후, datadir을 물리 복사(rsync)로 `/data`에서 `/home`으로 영구 이전(다운타임 최소화, VIP 영향 없음 확인). chan09(레플리카)는 폐기 전제로 mysqld만 중지. 3노드 `/data` 모두 wipefs로 raw 상태 전환 완료
