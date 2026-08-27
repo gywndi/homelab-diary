@@ -77,8 +77,8 @@ flowchart TB
 - [x] **RBD pool + StorageClass 생성 완료 (2026-08-27)** — `rbd-pool`(size=3/min_size=2), exclusive-lock 포함
 - [x] **RGW(오브젝트 스토어) 생성 + VIP 노출 완료 (2026-08-27)** — dataPool은 연구용이라 용량 우선으로 size=2/min_size=1로 낮춤(metadataPool은 3 유지), VIP `10.5.5.6:7480`에서 정상 응답 확인
 - [x] **MySQL을 RBD PVC 기반 k8s 워크로드로 컷오버 완료 (2026-08-27)** — `mysql` 네임스페이스에 Deployment(replicas=1, Recreate 전략) + 30Gi RBD PVC로 재배포. StatefulSet 대신 Deployment+Recreate를 쓴 이유는 단일 인스턴스라 StatefulSet의 순번 관리가 실익이 없어서. 데이터는 chan08에서 mysqld를 내리고 `tar` 스트림으로 임시 파드에 복사(17G, 약 5분) 후 이관. VIP `10.5.5.4`는 keepalived를 내리고 MetalLB로 같은 IP를 재할당해 애플리케이션 재설정 없이 유지. **총 다운타임 약 6분 38초**(21:38:12~21:44:50). 기존 keepalived/native mysql은 `systemctl disable`만 해두고 데이터·설정은 롤백 안전망으로 보존 중(완전 제거는 안정성 확인 후 별도 진행)
-- [ ] libvirt storage pool을 rbd 타입으로 재정의
-- [ ] StarRocks 배포 시 RGW 엔드포인트 연동
+- [ ] libvirt storage pool을 rbd 타입으로 재정의 (KVM은 나중으로 미룸)
+- [x] **StarRocks shared-data 배포 완료 (2026-08-27)** — RGW 엔드포인트 연동, end-to-end 검증까지 완료. 상세는 [StarRocks shared-data 배포](starrocks-shared-data.md) 참고
 
 ## 스크립트 목록
 

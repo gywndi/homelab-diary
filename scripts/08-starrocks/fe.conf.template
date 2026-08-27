@@ -1,0 +1,23 @@
+LOG_DIR = ${STARROCKS_HOME}/log
+DATE = $(date +%Y%m%d-%H%M%S)
+JAVA_OPTS="-Dlog4j2.formatMsgNoLookups=true -Xmx2048m -XX:+UseG1GC -Xlog:gc*:${LOG_DIR}/fe.gc.log.$DATE:time"
+http_port = 8030
+rpc_port = 9020
+query_port = 9030
+edit_log_port = 9010
+mysql_service_nio_enabled = true
+sys_log_level = INFO
+run_mode = shared_data
+cloud_native_storage_type = S3
+cloud_native_meta_port = 6090
+enable_load_volume_from_conf = true
+# 콜드 스타트 시 첫 테이블 생성이 60~300초 걸릴 수 있음(scripts/08-starrocks/README.md 참고) —
+# 기본값 10초로는 무조건 실패한다.
+tablet_create_timeout_second = 60
+aws_s3_path = starrocks-storage
+aws_s3_region = default
+aws_s3_endpoint = http://rgw-starrocks-store-lb.rook-ceph.svc:7480
+aws_s3_use_aws_sdk_default_behavior = false
+aws_s3_use_instance_profile = false
+aws_s3_access_key = __ACCESS_KEY__
+aws_s3_secret_key = __SECRET_KEY__
