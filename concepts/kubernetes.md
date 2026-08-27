@@ -163,7 +163,7 @@ kubectl, kube-scheduler, kube-controller-manager, kubelet의 상태 보고는 �
 - **컨테이너 런타임 직접 조회**: `ctr -n k8s.io containers ls`처럼 containerd에 바로 물어보면 kubelet/API 서버 없이도 그 노드에 뭐가 떠 있는지 확인 가능.
 - **kubeadm reset/join**: 근본적으로 그 노드의 로컬 파일(`/etc/kubernetes/`, `/var/lib/kubelet/`)을 직접 조작하는 호스트 작업이다.
 
-컨트롤플레인 전체가 죽어서 API 서버가 하나도 안 뜨는 최악의 상황이면: 이미 떠 있던 애플리케이션 파드는 kubelet이 로컬 캐시로 계속 관리해서 안 사라지고(새 스케줄링만 멈춤), 복구는 API 서버 없이도 되는 etcd 스냅샷(`09-etcd-backup.sh`)으로 한다.
+컨트롤플레인 전체가 죽어서 API 서버가 하나도 안 뜨는 최악의 상황이면: 이미 떠 있던 애플리케이션 파드는 kubelet이 로컬 캐시로 계속 관리해서 안 사라지고(새 스케줄링만 멈춤), 복구는 API 서버 없이도 되는 etcd 스냅샷([`09-etcd-backup.sh`](../scripts/02-k8s-cluster/09-etcd-backup.sh))으로 한다.
 
 ### 2. DaemonSet — kube-flannel, kube-proxy, metallb-system/speaker (전부 노드마다 하나씩)
 ```bash

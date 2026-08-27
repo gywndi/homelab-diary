@@ -208,13 +208,13 @@ sudo mv /var/lib/etcd/etcd-backup-tmp.db /data/etcd-backup/etcd-snapshot-<타임
 - **뒤늦게 VIP를 끼워 넣으려면 인증서까지 건드려야 한다**: 이미 발급된 apiserver 인증서의 SAN(Subject Alternative Name)에는 VIP가 없어서, `ClusterConfiguration`을 고쳐 controlPlaneEndpoint를 추가한 뒤 인증서를 강제로 재발급해야 한다. `kubeadm init phase certs apiserver`는 파일이 이미 있으면 재발급을 건너뛰므로 기존 파일을 지워야 하고, 떠 있는 apiserver 프로세스는 재시작해야 새 인증서를 읽는다(정적 파드 매니페스트를 잠깐 옮겼다 되돌리는 방식으로 강제).
 - **join 명령 생성도 옛날 주소를 계속 가리킨다**: `kubeadm token create --print-join-command`가 참조하는 `kube-public/cluster-info` ConfigMap은 `ClusterConfiguration`과 별개로 저장돼 있어서, 위 재발급을 해도 자동으로 안 바뀐다. 이것까지 따로 고치지 않으면 새로 뽑은 join 명령이 여전히 옛날 고정 IP를 가리켜서 헷갈리는 실패를 겪는다.
 
-이미 고정 IP로 초기화해버린 클러스터가 있다면 [`10-retrofit-control-plane-endpoint-from-fixed-ip.sh`](../scripts/02-k8s-cluster/10-retrofit-control-plane-endpoint-from-fixed-ip.sh)로 위 세 가지를 한 번에 처리할 수 있다 (기존 컨트롤플레인에서 1회 실행). 하지만 애초에 이 문서처럼 `04-init-control-plane.sh` 단계에서 VIP를 미리 정해두면 이 스크립트 자체가 필요 없다 — **컨트롤플레인을 하나만 쓸 계획이라도, 나중에 늘릴 가능성이 조금이라도 있다면 처음부터 VIP로 시작하는 쪽이 훨씬 싸게 먹힌다.**
+이미 고정 IP로 초기화해버린 클러스터가 있다면 [`10-retrofit-control-plane-endpoint-from-fixed-ip.sh`](../scripts/02-k8s-cluster/10-retrofit-control-plane-endpoint-from-fixed-ip.sh)로 위 세 가지를 한 번에 처리할 수 있다 (기존 컨트롤플레인에서 1회 실행). 하지만 애초에 이 문서처럼 [`04-init-control-plane.sh`](../scripts/02-k8s-cluster/04-init-control-plane.sh) 단계에서 VIP를 미리 정해두면 이 스크립트 자체가 필요 없다 — **컨트롤플레인을 하나만 쓸 계획이라도, 나중에 늘릴 가능성이 조금이라도 있다면 처음부터 VIP로 시작하는 쪽이 훨씬 싸게 먹힌다.**
 
 ## 알려진 이슈: UFW가 pod 네트워크를 막음
 
 [`04-firewall.sh`](../scripts/01-provision/04-firewall.sh)로 UFW를 활성화하면 `/etc/default/ufw`의 `DEFAULT_FORWARD_POLICY`가 기본 `DROP`으로 설정된다. 이 상태에서는 iptables `FORWARD` 체인 기본 정책이 DROP이 되어, kube-proxy/Flannel이 만든 규칙에 명시적으로 걸리지 않는 pod→ClusterIP 트래픽이 막힌다. 실제로 CoreDNS가 `[WARNING] plugin/kubernetes: starting server with unsynced Kubernetes API` 상태에서 멈추는 증상으로 나타났다.
 
-`08-fix-ufw-forward.sh`가 `DEFAULT_FORWARD_POLICY`를 `ACCEPT`로 바꾸고 `ufw reload`한다. **인바운드 규칙(10.5.5.0/24 제한)에는 영향 없음** — FORWARD 체인(라우팅되는 트래픽)만 대상. 앞으로 이 서버들에 UFW를 다시 초기화하는 경우 이 스크립트를 반드시 함께 적용해야 한다.
+[`08-fix-ufw-forward.sh`](../scripts/02-k8s-cluster/08-fix-ufw-forward.sh)가 `DEFAULT_FORWARD_POLICY`를 `ACCEPT`로 바꾸고 `ufw reload`한다. **인바운드 규칙(10.5.5.0/24 제한)에는 영향 없음** — FORWARD 체인(라우팅되는 트래픽)만 대상. 앞으로 이 서버들에 UFW를 다시 초기화하는 경우 이 스크립트를 반드시 함께 적용해야 한다.
 
 ## 알려진 이슈: etcd 컨테이너 이미지엔 tar/cat/rm도 없음
 

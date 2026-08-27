@@ -22,7 +22,7 @@
 전부 `sudo`로 실행해야 한다. 각 서버 `~/provision/`에도 동일한 스크립트가 복사되어 있다.
 
 ### 일괄 실행
-- 설명: `02-system-update.sh` → `03-timezone.sh` → `04-firewall.sh` → `01-format-mount-data.sh`를 순서대로 그대로 호출하는 래퍼.
+- 설명: [`02-system-update.sh`](../scripts/01-provision/02-system-update.sh) → [`03-timezone.sh`](../scripts/01-provision/03-timezone.sh) → [`04-firewall.sh`](../scripts/01-provision/04-firewall.sh) → [`01-format-mount-data.sh`](../scripts/01-provision/01-format-mount-data.sh)를 순서대로 그대로 호출하는 래퍼.
 - 스크립트: [`00-run-all.sh`](../scripts/01-provision/00-run-all.sh)
 
 ### 데이터 디스크 포맷 + 마운트
@@ -122,7 +122,7 @@ sudo chmod 0440 /etc/sudoers.d/90-chan-nopasswd
 sudo visudo -c
 ```
 
-## 방화벽 정책 (`04-firewall.sh`)
+## 방화벽 정책 ([`04-firewall.sh`](../scripts/01-provision/04-firewall.sh))
 
 기본 정책: **인바운드 전체 차단**, 아웃바운드 전체 허용. 인바운드는 내부 대역 `10.5.5.0/24`에서만 아래 포트를 허용한다.
 
@@ -139,12 +139,12 @@ sudo visudo -c
 | 3306 | tcp | MySQL |
 | vrrp | - | keepalived (MySQL VIP 페일오버) |
 
-> `05-firewall-stage1.sh`로 Stage 1 확정 사항(CNI=Flannel, MySQL, keepalived) 반영 완료.
+> [`05-firewall-stage1.sh`](../scripts/01-provision/05-firewall-stage1.sh)로 Stage 1 확정 사항(CNI=Flannel, MySQL, keepalived) 반영 완료.
 > Calico 미사용 확정으로 179/tcp, 4789/udp는 제거됨.
 
 상태 확인: `sudo ufw status verbose`
 
-## 데이터 디스크 (`01-format-mount-data.sh`)
+## 데이터 디스크 ([`01-format-mount-data.sh`](../scripts/01-provision/01-format-mount-data.sh))
 
 - 대상 디바이스는 서버마다 다르므로 **반드시 인자로 전달**해야 한다 (하드코딩 안 함).
 - XFS로 강제 포맷(`mkfs.xfs -f`) 하므로 **기존 데이터는 삭제**된다. 실행 전 `lsblk`, `blkid`로 대상 디바이스를 재확인할 것.
@@ -157,5 +157,5 @@ sudo visudo -c
 2026-08-24 두 서버 모두 아래 순서로 적용 및 재부팅 후 검증 완료:
 1. SSH 키 인증 확인
 2. sudoers NOPASSWD 적용
-3. `02-system-update.sh` → `03-timezone.sh` → `04-firewall.sh` → `01-format-mount-data.sh` 순 실행
+3. [`02-system-update.sh`](../scripts/01-provision/02-system-update.sh) → [`03-timezone.sh`](../scripts/01-provision/03-timezone.sh) → [`04-firewall.sh`](../scripts/01-provision/04-firewall.sh) → [`01-format-mount-data.sh`](../scripts/01-provision/01-format-mount-data.sh) 순 실행
 4. 커널 업데이트로 인한 재부팅 수행, 재부팅 후 타임존/방화벽/`/data` 마운트/sudo 모두 정상 유지 확인

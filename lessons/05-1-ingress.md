@@ -140,7 +140,7 @@ kubectl annotate ingress app1-example-com \
 ## 알려진 이슈
 
 ### 컨트롤플레인 파드의 same-node hairpin이 UFW에 막힘
-지금까지 UFW 규칙은 전부 "물리 LAN 대역(10.5.5.0/24)에서 오는 트래픽"만 허용해왔다. chan09의 파드가 API 서버(chan08)에 붙을 때는 Flannel VXLAN을 거치면서 kube-proxy가 소스 IP를 노드 IP로 마스커레이드해줘서 이 규칙에 걸려 통과했는데, chan08 자기 자신에 뜬 파드가 같은 노드의 API 서버로 붙을 때는 이 마스커레이드가 일어나지 않아 파드 서브넷 IP(`10.244.0.0/16`)가 그대로 노출된다. UFW 로그에 `IN=cni0 SRC=10.244.0.x DST=10.5.5.8 DPT=6443`으로 정확히 찍혔다. 지금까지 컨트롤플레인 노드에 일반 파드가 뜬 적이 없어서(ingress-nginx가 최초) 드러나지 않았던 문제. `04-fix-ufw-pod-hairpin.sh`로 파드 서브넷을 6443에 허용해서 해결 — 앞으로 컨트롤플레인에 파드를 스케줄하는 다른 컴포넌트를 추가할 때도 같은 클래스의 문제가 재발할 수 있다.
+지금까지 UFW 규칙은 전부 "물리 LAN 대역(10.5.5.0/24)에서 오는 트래픽"만 허용해왔다. chan09의 파드가 API 서버(chan08)에 붙을 때는 Flannel VXLAN을 거치면서 kube-proxy가 소스 IP를 노드 IP로 마스커레이드해줘서 이 규칙에 걸려 통과했는데, chan08 자기 자신에 뜬 파드가 같은 노드의 API 서버로 붙을 때는 이 마스커레이드가 일어나지 않아 파드 서브넷 IP(`10.244.0.0/16`)가 그대로 노출된다. UFW 로그에 `IN=cni0 SRC=10.244.0.x DST=10.5.5.8 DPT=6443`으로 정확히 찍혔다. 지금까지 컨트롤플레인 노드에 일반 파드가 뜬 적이 없어서(ingress-nginx가 최초) 드러나지 않았던 문제. [`04-fix-ufw-pod-hairpin.sh`](../scripts/05-ingress/04-fix-ufw-pod-hairpin.sh)로 파드 서브넷을 6443에 허용해서 해결 — 앞으로 컨트롤플레인에 파드를 스케줄하는 다른 컴포넌트를 추가할 때도 같은 클래스의 문제가 재발할 수 있다.
 
 ### 2노드 + hard anti-affinity에서 롤링업데이트가 멈춤
 replicas=2에 "노드당 1개"를 강제하는 `requiredDuringScheduling` anti-affinity를 걸면, 기본 롤링업데이트 전략(maxSurge 25%)이 임시로 3번째 파드를 띄우려다 배치할 노드가 없어 `Pending`으로 멈춘다. `maxSurge: 0, maxUnavailable: 1`로 바꿔서 "기존 파드를 하나 내리고 나서 새 파드를 올리는" 방식으로 전환해 해결.
