@@ -1,6 +1,6 @@
-# Ceph 스토리지 레이어 도입 (설계 중, 실행 전)
+# Ceph 스토리지 레이어 도입 (진행 중)
 
-> 이 문서는 초안이다. 아래 내용은 아직 실제 서버에 적용하지 않은 설계 단계이며, 실행·검증이 끝나면 `lessons/`로 옮겨 다듬는다.
+> 이 문서는 초안이다. 검증까지 끝나면 `lessons/`로 옮겨 다듬는다. 2026-08-27 기준: MySQL 물리 이전 + 3노드 `/data` wipe까지 완료, Rook-Ceph 배포는 아직.
 
 StarRocks 컴퓨팅/스토리지 분리 구성을 테스트해보기 전에, 그 전제가 되는 스토리지 레이어를 Ceph로 통일하기로 했다. 새 장비를 들이지 않고 기존 3노드(chan08/chan09/llm001)를 재구성하는 것만으로 진행한다.
 
@@ -49,23 +49,29 @@ flowchart TB
     RGW --> SR["StarRocks CN<br/>(shared-data)"]
 ```
 
-## 진행 상태 — 실행 전, 아래 순서로 진행 예정
+## 실행 중 발견한 이슈
 
-- [ ] MySQL 백업 (mysqldump/xtrabackup)
-- [ ] chan09: 복제 중지 → `/data` wipe (레플리카라 별도 백업 불필요)
-- [ ] chan08: 백업 확인 후 `/data` wipe
-- [ ] llm001: `/data` wipe (데이터 없음, 바로 진행 가능)
-- [x] Rook-Ceph 매니페스트 작성 (아래 스크립트 목록) — 실행은 위 디스크 정리 이후
+- **datadir을 옮겨도 binlog는 안 따라온다.** `datadir`을 `/data/mysql` → `/home/mysql`로 바꿨는데, `/data`가 계속 busy(umount 불가)였다. 원인은 별도 튜닝 설정 파일에 `log_bin = /data/mysql/mysql-bin`이 절대경로로 하드코딩되어 있던 것 — datadir 설정과 별개라 안 바뀌고 계속 옛 경로에 쓰고 있었다. `SHOW VARIABLES LIKE '%dir%'`류가 아니라 각 설정 파일에서 절대경로를 쓰는 항목(log_bin, innodb_undo_directory 등)을 따로 확인해야 한다.
+- **AppArmor 로컬 오버라이드도 같이 옮겨야 한다.** Ubuntu MySQL 패키지는 `/etc/apparmor.d/local/usr.sbin.mysqld`에 datadir 경로를 화이트리스트로 걸어둔다. 새 경로를 추가하지 않으면 mysqld가 파일 접근을 거부당하며 죽는다.
+- **되돌릴 수 없는 원격 명령은 Claude Code 자동 모드 분류기가 막는다.** `wipefs` 같은 명령은 세션 권한으로 승인해도 별도 분류기가 한 번 더 막아서, 프로젝트 로컬 설정(`.claude/settings.local.json`)에 해당 호스트로의 ssh/scp를 허용 규칙으로 추가해야 진행할 수 있었다.
+
+## 진행 상태
+
+- [x] Rook-Ceph 매니페스트 작성
+- [x] **MySQL/디스크 정리 완료 (2026-08-27)** — chan08은 mysqldump 안전 백업 후, datadir을 물리 복사(rsync)로 `/data`에서 `/home`으로 영구 이전(다운타임 최소화, VIP 영향 없음 확인). chan09(레플리카)는 폐기 전제로 mysqld만 중지. 3노드 `/data` 모두 wipefs로 raw 상태 전환 완료
 - [ ] Rook-Ceph 배포 (hostNetwork, 3-replica)
 - [ ] RBD pool + StorageClass, RGW(오브젝트 스토어) 생성
-- [ ] MySQL StatefulSet 배포 + 데이터 복원 + VIP 컷오버
+- [ ] MySQL StatefulSet 배포 + `/home` 데이터를 RBD PVC로 이전 + VIP 컷오버
 - [ ] libvirt storage pool을 rbd 타입으로 재정의
 - [ ] StarRocks 배포 시 RGW 엔드포인트 연동
 
-## 스크립트 목록 (작성 완료, 실행은 디스크 정리 이후)
+## 스크립트 목록
 
 - 방화벽: [`00-open-ceph-firewall-ports.sh`](../scripts/07-ceph-storage/00-open-ceph-firewall-ports.sh) — 3노드 모두에서 실행, hostNetwork용 mon/osd/mgr/RGW 포트 개방
 - operator: [`01-install-rook-operator.sh`](../scripts/07-ceph-storage/01-install-rook-operator.sh) — Rook CRD/operator 설치 (v1.20.6)
 - 클러스터: [`02-apply-cluster.sh`](../scripts/07-ceph-storage/02-apply-cluster.sh) + [`02-cluster.yaml`](../scripts/07-ceph-storage/02-cluster.yaml) — CephCluster 생성, 노드별 디바이스 명시(`chan08`/`chan09`=`sda1`, `llm001`=`nvme0n1p3`)
 - 블록 스토리지: [`03-apply-storageclass.sh`](../scripts/07-ceph-storage/03-apply-storageclass.sh) + [`03-storageclass.yaml`](../scripts/07-ceph-storage/03-storageclass.yaml) — RBD 풀(3-replica) + StorageClass, exclusive-lock 포함
 - 오브젝트 스토리지: [`04-apply-objectstore.sh`](../scripts/07-ceph-storage/04-apply-objectstore.sh) + [`04-objectstore.yaml`](../scripts/07-ceph-storage/04-objectstore.yaml) — RGW + MetalLB VIP 노출
+- MySQL 백업: [`05-backup-mysql.sh`](../scripts/07-ceph-storage/05-backup-mysql.sh) — 전체 mysqldump (안전망)
+- MySQL 이전: [`06-relocate-mysql-datadir.sh`](../scripts/07-ceph-storage/06-relocate-mysql-datadir.sh) — datadir을 `/data`→`/home`으로 물리 복사 이전 (AppArmor/log_bin 경로 수정 포함)
+- 디스크 wipe: [`07-wipe-data-disk.sh`](../scripts/07-ceph-storage/07-wipe-data-disk.sh) — `/data`를 raw 상태로 전환
