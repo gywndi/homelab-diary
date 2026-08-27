@@ -1,6 +1,6 @@
 # MySQL active/standby (Stage 1)
 
-chan08(source) ↔ chan09(replica), semi-sync 복제, keepalived VIP `10.5.5.210`로 페일오버.
+chan08(source) ↔ chan09(replica), semi-sync 복제, keepalived VIP `10.5.5.4`로 페일오버.
 
 MySQL 8.0.46, datadir `/data/mysql`, `innodb_buffer_pool_size=2G`. k8s 밖에 호스트 네이티브로 설치 — 클러스터가 흔들려도 데이터는 별도로 보호하기 위함.
 
@@ -30,7 +30,7 @@ sudo rsync -a /var/lib/mysql.bak.<타임스탬프>/ /data/mysql/
 # 복사 과정에서 바뀌었을 수 있는 소유자를 mysql 계정으로 되돌림
 sudo chown -R mysql:mysql /data/mysql
 ```
-AppArmor 로컬 오버라이드에 두 줄 추가 후 재시작 (새 데이터 경로에 대한 접근 허용):
+AppArmor(리눅스 커널의 강제 접근 제어 — mysqld가 접근 가능한 경로를 화이트리스트로 제한한다) 로컬 오버라이드 파일에 두 줄 추가 후 재시작 (새 데이터 경로에 대한 접근 허용):
 ```bash
 /data/mysql/ r,
 /data/mysql/** rwk,
@@ -75,7 +75,8 @@ sudo systemctl restart mysql
 # 복제 계정용 비밀번호를 예측 불가능한 값으로 생성
 openssl rand -base64 24
 
-# VRRP 인증키 생성 (keepalived auth_pass는 8자 제한)
+# VRRP(keepalived가 노드 간 "누가 VIP를 들 차례인지" 합의할 때 쓰는 프로토콜) 인증키 생성
+# (keepalived auth_pass는 8자 제한)
 openssl rand -hex 4
 ```
 생성한 두 값을 양쪽 서버의 전용 시크릿 디렉터리에 배포 (root의 홈 디렉터리와 분리, `/etc/homelab-secrets` 0700 root:root):
@@ -154,7 +155,7 @@ sudo apt-get install -y keepalived
 ```bash
 # chan08: state MASTER, priority 150 — 정상 시 항상 VIP를 가져감
 # chan09: state BACKUP, priority 100
-# 공통: virtual_ipaddress 10.5.5.210/24
+# 공통: virtual_ipaddress 10.5.5.4/24
 ```
 헬스체크 스크립트(`/usr/local/bin/chk_mysql.sh`)는 mysqld 생존 확인 앞에 **수동 게이트 파일** 체크를 추가로 거친다:
 ```bash
@@ -202,7 +203,7 @@ Ubuntu 기본 `mysqld.cnf`의 `datadir` 줄은 `# datadir = /var/lib/mysql`처�
 
 ## 애플리케이션 연결
 
-MySQL 클라이언트는 **VIP `10.5.5.210:3306`**으로 접속. 어느 쪽이 source인지 신경 쓸 필요 없이 keepalived가 항상 현재 source(우선순위가 높은 쪽, 정상 시 chan08)로 트래픽을 보낸다.
+MySQL 클라이언트는 **VIP `10.5.5.4:3306`**으로 접속. 어느 쪽이 source인지 신경 쓸 필요 없이 keepalived가 항상 현재 source(우선순위가 높은 쪽, 정상 시 chan08)로 트래픽을 보낸다.
 
 주의: 이 구성은 자동 페일오버(VIP 이동)만 하고, **레플리카를 자동으로 새 source로 승격하지 않는다** (semi-sync replica는 여전히 chan08을 SOURCE_HOST로 바라봄). chan08 자체가 완전히 죽는 실제 장애 시엔 chan09를 수동으로 승격(`RESET REPLICA ALL`, 쓰기 허용 등)해야 한다. Stage 1 범위에서는 "VIP 자동 전환 + 승격은 수동" 정도로 충분하다고 판단했다 (트래픽이 작고, 운영자가 상주하는 환경).
 
@@ -216,5 +217,5 @@ sudo mysql -e "SHOW REPLICA STATUS\G"
 sudo mysql -e "SHOW STATUS LIKE 'Rpl_semi_sync%';"
 
 # VIP 위치
-ip -4 addr show enp1s0 | grep 10.5.5.210
+ip -4 addr show enp1s0 | grep 10.5.5.4
 ```

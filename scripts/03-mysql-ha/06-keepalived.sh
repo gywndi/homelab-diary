@@ -10,7 +10,7 @@ export DEBIAN_FRONTEND=noninteractive
 
 STATE="${1:-}"
 PRIORITY="${2:-}"
-VIP="10.5.5.210"
+VIP="10.5.5.4"
 VRRP_PASS_FILE="/etc/homelab-secrets/keepalived_vrrp_pass"
 
 if [[ -z "$STATE" || -z "$PRIORITY" ]]; then
