@@ -2,12 +2,12 @@
 # 복제 레플리카(chan09) 설정: semi-sync replica 플러그인 + 복제 시작
 #
 # 사용법: sudo ./05-replica-setup.sh
-# 사전 조건: 03-generate-secrets.sh 로 /root/.mysql_repl_password 배포, 04-source-setup.sh가 chan08에서 먼저 실행되어 있어야 함
+# 사전 조건: 03-generate-secrets.sh 로 /etc/homelab-secrets/mysql_repl_password 배포, 04-source-setup.sh가 chan08에서 먼저 실행되어 있어야 함
 
 set -euo pipefail
 
 SOURCE_HOST="10.5.5.8"
-REPL_PASS_FILE="/root/.mysql_repl_password"
+REPL_PASS_FILE="/etc/homelab-secrets/mysql_repl_password"
 if [[ ! -f "$REPL_PASS_FILE" ]]; then
   echo "오류: $REPL_PASS_FILE 없음. 03-generate-secrets.sh를 먼저 실행하세요." >&2
   exit 1

@@ -11,7 +11,7 @@ export DEBIAN_FRONTEND=noninteractive
 STATE="${1:-}"
 PRIORITY="${2:-}"
 VIP="10.5.5.210"
-VRRP_PASS_FILE="/root/.keepalived_vrrp_pass"
+VRRP_PASS_FILE="/etc/homelab-secrets/keepalived_vrrp_pass"
 
 if [[ -z "$STATE" || -z "$PRIORITY" ]]; then
   echo "사용법: $0 <MASTER|BACKUP> <priority>" >&2

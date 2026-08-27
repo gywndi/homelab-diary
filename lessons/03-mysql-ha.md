@@ -78,19 +78,27 @@ openssl rand -base64 24
 # VRRP 인증키 생성 (keepalived auth_pass는 8자 제한)
 openssl rand -hex 4
 ```
-생성한 두 값을 양쪽 서버의 root 전용 파일로 배포:
+생성한 두 값을 양쪽 서버의 전용 시크릿 디렉터리에 배포 (root의 홈 디렉터리와 분리, `/etc/homelab-secrets` 0700 root:root):
 ```bash
+# 전용 디렉터리 생성 (양쪽)
+ssh 10.5.5.8 "sudo mkdir -p /etc/homelab-secrets && sudo chmod 700 /etc/homelab-secrets"
+ssh 10.5.5.9 "sudo mkdir -p /etc/homelab-secrets && sudo chmod 700 /etc/homelab-secrets"
+
 # chan08에 복제 비밀번호 저장
-ssh 10.5.5.8 "echo '<복제 비밀번호>' | sudo tee /root/.mysql_repl_password"
+ssh 10.5.5.8 "echo '<복제 비밀번호>' | sudo tee /etc/homelab-secrets/mysql_repl_password"
 
 # chan08에 VRRP 인증키 저장
-ssh 10.5.5.8 "echo '<VRRP 인증키>' | sudo tee /root/.keepalived_vrrp_pass"
+ssh 10.5.5.8 "echo '<VRRP 인증키>' | sudo tee /etc/homelab-secrets/keepalived_vrrp_pass"
 
 # chan09에 동일한 복제 비밀번호 저장
-ssh 10.5.5.9 "echo '<복제 비밀번호>' | sudo tee /root/.mysql_repl_password"
+ssh 10.5.5.9 "echo '<복제 비밀번호>' | sudo tee /etc/homelab-secrets/mysql_repl_password"
 
 # chan09에 동일한 VRRP 인증키 저장
-ssh 10.5.5.9 "echo '<VRRP 인증키>' | sudo tee /root/.keepalived_vrrp_pass"
+ssh 10.5.5.9 "echo '<VRRP 인증키>' | sudo tee /etc/homelab-secrets/keepalived_vrrp_pass"
+
+# 양쪽 다 소유자/권한 정리
+ssh 10.5.5.8 "sudo chown root:root /etc/homelab-secrets/*; sudo chmod 600 /etc/homelab-secrets/*"
+ssh 10.5.5.9 "sudo chown root:root /etc/homelab-secrets/*; sudo chmod 600 /etc/homelab-secrets/*"
 ```
 
 ### 복제 소스 설정
