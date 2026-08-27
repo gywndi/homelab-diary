@@ -33,12 +33,19 @@ echo "== keepalived 설치 =="
 apt-get update -y
 apt-get install -y keepalived
 
-echo "== mysqld 헬스체크 스크립트 =="
+echo "== mysqld 헬스체크 스크립트 (수동 게이트 파일 포함) =="
 cat > /usr/local/bin/chk_mysql.sh <<'EOF'
 #!/bin/bash
-mysqladmin ping -h 127.0.0.1 --silent
+# /etc/keepalived/allow_master가 없으면 mysqld가 멀쩡해도 헬스체크를 실패시킨다.
+# 장애로 반대쪽이 소스로 수동 승격된 뒤, 이 노드가 재부팅 등으로 되살아나도
+# 자동으로 VIP를 다시 뺏어가지 못하게(페일백 방지) 막는 수동 게이트.
+# 정상 운영 중엔 이 파일이 있어야 한다 — 아래에서 기본 생성함.
+[[ -f /etc/keepalived/allow_master ]] && mysqladmin ping -h 127.0.0.1 --silent
 EOF
 chmod +x /usr/local/bin/chk_mysql.sh
+
+echo "== 마스터 후보 게이트 파일 기본 생성 (평소엔 있어야 정상 동작) =="
+touch /etc/keepalived/allow_master
 
 echo "== keepalived.conf 작성 (interface=$IFACE) =="
 cat > /etc/keepalived/keepalived.conf <<EOF

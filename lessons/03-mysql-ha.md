@@ -156,16 +156,39 @@ sudo apt-get install -y keepalived
 # chan09: state BACKUP, priority 100
 # 공통: virtual_ipaddress 10.5.5.210/24
 ```
+헬스체크 스크립트(`/usr/local/bin/chk_mysql.sh`)는 mysqld 생존 확인 앞에 **수동 게이트 파일** 체크를 추가로 거친다:
+```bash
+# /etc/keepalived/allow_master가 없으면 mysqld가 멀쩡해도 실패 처리
+[[ -f /etc/keepalived/allow_master ]] && mysqladmin ping -h 127.0.0.1 --silent
+```
+```bash
+# 평소엔 이 파일이 있어야 정상 동작 (스크립트가 기본 생성)
+sudo touch /etc/keepalived/allow_master
+```
 ```bash
 # 설정 반영을 위해 재시작
 sudo systemctl restart keepalived
 ```
+
+**게이트 파일의 용도**: 장애로 반대쪽이 소스로 수동 승격된 뒤, 원래 노드가 재부팅 등으로 되살아나도 keepalived 우선순위(chan08=150 > chan09=100) 때문에 **자동으로 VIP를 다시 뺏어가는 것(페일백)을 막기 위함**이다. `mysqladmin ping`은 "mysqld가 응답하는지"만 볼 뿐 "데이터가 최신인지"는 전혀 확인 안 하므로, 그대로 두면 오래된 데이터를 가진 노드로 쓰기 트래픽이 몰릴 위험이 있다. 실제 장애 시 대응 순서:
+1. chan09를 소스로 수동 승격 (기존 "애플리케이션 연결" 절차)
+2. chan08의 게이트 파일 제거: `sudo rm /etc/keepalived/allow_master` — 이후 chan08의 mysqld가 살아나도 마스터 후보에서 계속 배제됨
+3. chan08을 chan09의 새 레플리카로 재동기화
+4. 정상 확인 후 게이트 파일 재생성: `sudo touch /etc/keepalived/allow_master` — 그제서야 chan08이 다시 후보로 복귀 (우선순위상 즉시 VIP를 다시 가져감)
 
 ## 알려진 이슈: `01-install-mysql.sh` 초기 버전 datadir sed 실패
 
 Ubuntu 기본 `mysqld.cnf`의 `datadir` 줄은 `# datadir = /var/lib/mysql`처럼 **주석 처리**되어 있어, `sed`로 값만 바꾸는 방식은 매치되지 않아 조용히 실패했다. 그 결과 `/var/lib/mysql`을 이미 옮긴 상태에서 mysqld가 기본 경로를 찾지 못해 재시작 루프에 빠졌다.
 
 현재 스크립트는 `sed` 대신 `/etc/mysql/mysql.conf.d/zz-datadir.cnf`라는 새 conf.d 파일에 `datadir = /data/mysql`을 명시적으로 써서 우회한다 (파일명이 알파벳순으로 `mysqld.cnf`보다 뒤라 확실히 우선 적용됨). 복구가 필요했다면 `systemctl reset-failed mysql` 후 재기동.
+
+## 알려진 이슈: `allow_master` 게이트 파일의 운영 리스크
+
+- **양쪽 게이트 파일이 동시에 없어지면 완전 장애.** 둘 다 헬스체크가 실패해서 아무도 VIP를 못 받는 상태가 된다 — 페일백을 막으려던 안전장치가 잘못 다루면 새로운 단일 장애점이 될 수 있다.
+- **서버 재설치 시 까먹기 쉽다.** 새로 프로비저닝한 노드는 이 파일이 없는 상태로 시작하므로, `06-keepalived.sh`가 기본으로 생성해주지 않으면 "mysqld는 멀쩡한데 왜 마스터가 안 되는지" 한참 헤매게 된다.
+- **반영까지 최대 6초 지연된다** (`fall 3 × interval 2초`). 파일을 지워도 즉시가 아니라 최대 6초 후에 실제로 배제되므로, 급한 강제전환 상황에서 성급하게 "안 바뀐다"고 판단하면 안 된다.
+- **"진짜 장애냐 순간 블립이냐" 판단은 여전히 사람 몫이다.** 게이트 파일이 이 판단 자체를 대신해주지는 않는다 — chan08이 잠깐 재부팅된 것뿐이고 chan09가 실제로 승격된 적이 없다면, 게이트 파일을 안 건드리고 그냥 두는 게 맞다(정상적인 우선순위 기반 자동 복귀가 오히려 맞는 동작).
+- **`vrrp_script`에 `weight`를 설정하지 않았기 때문에, 헬스체크 실패 시 우선순위가 깎이는 게 아니라 그 인스턴스가 선거에서 완전히 배제(FAULT)된다.** 의도한 동작이지만, 나중에 누군가 `weight`를 추가하면 이 배제 동작이 "우선순위 소폭 감소"로 바뀌어서 게이트가 무력화될 수 있다.
 
 ## 페일오버 동작 검증 (2026-08-24 완료)
 
