@@ -14,6 +14,9 @@ BASE="https://raw.githubusercontent.com/rook/rook/${ROOK_VERSION}/deploy/example
 
 kubectl apply -f "${BASE}/crds.yaml"
 kubectl apply -f "${BASE}/common.yaml"
+# csi-operator.yaml: v1.20부터 CSI 드라이버 관리가 별도 ceph-csi-operator로 분리됨.
+# 이 CRD(OperatorConfig/Driver)가 없으면 operator.yaml 적용 시 "no matches for kind" 에러 발생.
+kubectl apply -f "${BASE}/csi-operator.yaml"
 kubectl apply -f "${BASE}/operator.yaml"
 
 echo "== operator 롤아웃 대기 =="
