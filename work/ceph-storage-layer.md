@@ -121,6 +121,41 @@ StarRocks 집계 쿼리가 Ceph 자체는 느린데도 30ms 미만으로 빠른 
 - [x] **MySQL을 RBD PVC 기반 k8s 워크로드로 컷오버 완료 (2026-08-27)** — `mysql` 네임스페이스에 Deployment(replicas=1, Recreate 전략) + 30Gi RBD PVC로 재배포. StatefulSet 대신 Deployment+Recreate를 쓴 이유는 단일 인스턴스라 StatefulSet의 순번 관리가 실익이 없어서. 데이터는 chan08에서 mysqld를 내리고 `tar` 스트림으로 임시 파드에 복사(17G, 약 5분) 후 이관. VIP `10.5.5.4`는 keepalived를 내리고 MetalLB로 같은 IP를 재할당해 애플리케이션 재설정 없이 유지. **총 다운타임 약 6분 38초**(21:38:12~21:44:50). 기존 keepalived/native mysql은 `systemctl disable`만 해두고 데이터·설정은 롤백 안전망으로 보존 중(완전 제거는 안정성 확인 후 별도 진행)
 - [ ] libvirt storage pool을 rbd 타입으로 재정의 (KVM은 나중으로 미룸)
 - [x] **StarRocks shared-data 배포 완료 (2026-08-27)** — RGW 엔드포인트 연동, end-to-end 검증까지 완료. 상세는 [StarRocks shared-data 배포](starrocks-shared-data.md) 참고
+- [x] **디스크를 Ceph(고정 300G) + XFS(나머지)로 재분할 완료 (2026-08-28)** — shared-nothing StarRocks(BE) 테스트를 위한 로컬 저장소 확보. 상세는 아래 참고
+
+## 디스크 재분할: Ceph 고정 300G + XFS (2026-08-28)
+
+StarRocks는 shared-data(FE+CN, 우리가 이미 배포한 것) 말고 전통적인 shared-nothing(FE+BE, 로컬 디스크) 모드도 지원한다 — 이걸 테스트해보기 위해 각 노드 디스크를 둘로 나눴다: Ceph OSD는 노드마다 고정 300G로 맞추고, 나머지는 XFS로 포맷해 향후 BE 로컬 스토리지로 쓴다.
+
+### 노드별 결과
+
+| 노드 | Ceph OSD | XFS(BE용) |
+|---|---|---|
+| chan08 | osd.3, `/dev/sda1` 279G | `/dev/sda2` 652G → `/mnt/starrocks-be` |
+| chan09 | osd.0, `/dev/sda1` 279G | `/dev/sda2` 652G → `/mnt/starrocks-be` |
+| llm001 | osd.1, `/dev/nvme0n1p3` 280G | `/dev/nvme0n1p4` 451G → `/mnt/starrocks-be` |
+
+llm001은 OS와 같은 물리 디스크(GPT)를 쓰고 있어서, 기존 p3(730.5G, Ceph OSD)만 삭제 후 재생성(p3=300G, p4=나머지)했다 — p1(EFI)/p2(root)는 전혀 건드리지 않았다. p3가 디스크의 마지막 파티션이었기 때문에 안전하게 가능했다.
+
+### 진행 순서 (한 노드씩, 안전 우선)
+
+각 노드마다: `ceph osd out` → PG remapping이 `active+clean`으로 안정화될 때까지 대기(misplaced는 무해, degraded/peering이 없어야 함) → deployment 삭제 + `ceph osd purge` → 디스크 재파티션 → 새 파티션 준비 → operator 재시작으로 재프로비저닝 → 전체 재분산이 끝나 281개 PG 전부 `active+clean`이 될 때까지 대기 → 다음 노드로.
+
+시작 전에 MySQL 전체 백업을 새로 떴다(직전 백업이 하루 지나 있었음). 3노드 모두 size=3(RBD)/size=2(RGW) 풀이 매 순간 min_size 이상을 유지한 채 진행해서 데이터 손실 없이 완료했다.
+
+### 겪은 문제: BlueStore 중복 레이블이 여러 위치에 흩어져 있다
+
+chan08에서 처음엔 디스크 앞/뒤 200MB만 `dd`로 지우고 재파티션했는데, 새로 만든(더 작은) 파티션에 Rook이 OSD를 새로 만들지 않고 "기존 OSD를 확장(expand-bluefs)"하려다 계속 크래시했다 — `ceph-bluestore-tool show-label`로 직접 확인해보니, BlueStore는 원본 디스크 크기(931GB) 기준으로 레이블을 **1GB, 10GB, 107GB 지점**에 중복 저장해두고 있었다. 200MB만 지운 걸로는 이 레이블들을 전혀 건드리지 못했던 것.
+
+해결: 새 파티션의 앞 **110GB를 통째로 `dd`로 제로화**해서 모든 중복 레이블 위치를 확실히 지웠다. chan09/llm001은 처음부터 이 방식을 적용해서 같은 문제를 겪지 않았다.
+
+부수적으로 두 가지 더 배웠다:
+- Rook의 osd-prepare Job은 디바이스 구성이 안 바뀐 것처럼 보이면(디바이스 이름이 같으면) 재실행을 스킵한다 — 강제로 다시 돌리려면 완료된 Job을 직접 삭제해야 한다.
+- 이전에 실패했거나 삭제한 OSD의 Deployment가 operator 재시작 때마다 유령처럼 되살아나는 경우가 있었다(`CrashLoopBackOff`/`Init:Error` 상태로) — Ceph 쪽에 이미 없는 OSD인데 k8s Deployment 오브젝트만 남아있던 것. 매번 `kubectl delete deployment`로 정리해야 했다.
+
+### 결과
+
+재분할 후 raw 용량은 이전 2.5TiB에서 838GiB로 줄었지만(의도한 트레이드오프), 3노드를 동일 크기(300G)로 맞추면서 OSD별 사용률/PG 분산이 거의 완벽하게 균등해졌다(`ceph osd df` 기준 VAR 1.00/1.00, STDDEV 0.01) — 이전엔 노드마다 디스크 크기가 달라서(932G/932G/730G) 약간의 불균형이 있었는데 오히려 개선됐다.
 
 ## 스크립트 목록
 
@@ -136,3 +171,4 @@ StarRocks 집계 쿼리가 Ceph 자체는 느린데도 30ms 미만으로 빠른 
 - MySQL 데이터 이전: [`09-mysql-migrate-data.sh`](../scripts/07-ceph-storage/09-mysql-migrate-data.sh) — 원본 mysqld 정지 후 tar 스트림으로 PVC에 복사(다운타임 유발 구간)
 - MySQL 배포: [`10-mysql-deploy.yaml`](../scripts/07-ceph-storage/10-mysql-deploy.yaml) — Deployment(replicas=1, Recreate) + Service
 - MySQL VIP 컷오버: [`11-mysql-vip-cutover.sh`](../scripts/07-ceph-storage/11-mysql-vip-cutover.sh) — keepalived 중지 → MetalLB로 같은 VIP 재할당
+- 디스크 재분할: [`12-resplit-osd-disk.sh`](../scripts/07-ceph-storage/12-resplit-osd-disk.sh) — 전용 데이터 디스크(chan08/chan09 sda 패턴)를 Ceph 고정 크기 + XFS로 재분할, BlueStore 중복 레이블 제거를 위한 110GB 제로화 포함. llm001처럼 OS와 디스크를 공유하는 경우는 이 스크립트 대신 수동으로 대상 파티션만 조정
