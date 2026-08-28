@@ -19,6 +19,21 @@ MPP(대규모 병렬 처리) 방식의 컬럼형 OLAP 데이터베이스. FE(제
 
 우리가 shared-data를 택한 이유는 애초에 "컴퓨팅/스토리지 분리"를 테스트하는 게 목적이었기 때문 — Ceph를 도입한 동기 자체가 이 모드를 쓰기 위해서였다.
 
+## 하이브리드: BE(로컬)와 CN(공유)을 같은 클러스터에서 동시에 (2026-08-28 검증 완료)
+
+**공식 문서에는 "shared-nothing과 shared-data 혼합 배포는 지원하지 않는다"는 문구가 있는데, 실제로 검증해보니 이건 "클러스터 생성 후 run_mode를 나중에 바꾸는 것(전환)"에 대한 제약으로 보인다.** `run_mode=shared_data`로 처음부터 띄운 FE에 `ALTER SYSTEM ADD BACKEND`로 BE를 등록하는 건 실제로 됐다 — 별도 FE/클러스터를 새로 만들 필요가 없었다.
+
+검증 과정:
+1. 기존 FE(run_mode=shared_data, CN 1개 이미 등록된 상태)에 BE 1개를 추가 배포(chan08의 XFS 파티션을 hostPath로 마운트)
+2. `ALTER SYSTEM ADD BACKEND "be-0.be-hl.starrocks.svc.cluster.local:9050"` — 에러 없이 등록됨
+3. `SHOW BACKENDS`에서 `Alive: true`, `TotalCapacity: 651.798GB`(XFS 파티션 크기와 일치) 확인
+4. **`replication_num` 등 특별한 property 없이 그냥 `CREATE TABLE`을 실행하면 자동으로 BE(로컬)로 라우팅된다** — CN을 명시적으로 타깃하는 별도 문법 없이도, BE가 등록되어 있으면 일반 테이블은 기본적으로 BE로 간다
+5. 같은 세션에서 기존 CN 기반(RGW) 테이블과 새 BE 기반(로컬 XFS) 테이블을 **동시에 조회** — 둘 다 정상 응답
+
+즉 하나의 FE 아래에서 "이 테이블은 로컬 디스크, 저 테이블은 오브젝트 스토리지"를 자연스럽게 섞어 쓸 수 있다. FE는 테이블별로 어느 백엔드(BE 로컬 vs CN+오브젝트 스토리지)를 쓰는지 알아서 관리한다.
+
+**주의**: 이건 우리 환경(FE/CN/BE 전부 4.1.4, 단일 노드씩)에서 확인한 사실이고, 공식 문서가 명시적으로 보증하는 조합은 아니다 — 향후 업그레이드나 공식 배포 도구(Operator) 사용 시 이 조합이 계속 지원되는지는 별도로 확인이 필요하다.
+
 ## FE (Frontend) — 제어 평면
 
 - **메타데이터 관리**: 전체 카탈로그(DB/테이블/파티션/버킷 정의)를 메모리에 전체 복사본으로 들고 있고, 변경분은 **BDBJE**(Berkeley DB Java Edition, Paxos류 합의)로 다른 FE에 복제한다. 과반수 FE가 살아있으면 클러스터가 정상 동작.

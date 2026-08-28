@@ -35,6 +35,7 @@ FE는 메타데이터(DB/테이블 정의, 트랜잭션 로그)를 자체 로컬
 - [x] FE(4.1.4) 배포, self-identity FQDN 정상 확인
 - [x] CN(4.1.4) 배포 + FE 등록, Alive/OK 확인
 - [x] end-to-end 검증 — `bmt_test.t1` 테이블 생성 + INSERT + SELECT 성공, RGW 버킷 오브젝트 수 증가(34→44) 확인
+- [x] **하이브리드(BE+CN 동시) 검증 완료 (2026-08-28)** — 같은 FE에 BE(로컬 XFS)를 추가로 등록해 CN(RGW) 테이블과 BE(로컬) 테이블을 동시에 조회 성공. 상세는 [StarRocks 아키텍처](starrocks-architecture.md#하이브리드-be로컬와-cn공유을-같은-클러스터에서-동시에-2026-08-28-검증-완료) 참고
 
 ## 스크립트 목록
 
@@ -42,3 +43,4 @@ FE는 메타데이터(DB/테이블 정의, 트랜잭션 로그)를 자체 로컬
 - [`01-deploy-fe.sh`](../scripts/08-starrocks/01-deploy-fe.sh) + [`fe.conf.template`](../scripts/08-starrocks/fe.conf.template) — FE 배포(headless Service + 고정 hostname)
 - [`02-deploy-cn.sh`](../scripts/08-starrocks/02-deploy-cn.sh) + [`cn.conf`](../scripts/08-starrocks/cn.conf) — CN 배포 + FE 등록
 - [`03-verify.sh`](../scripts/08-starrocks/03-verify.sh) — end-to-end 검증 (DB/테이블/INSERT/SELECT)
+- [`04-deploy-be-hybrid.sh`](../scripts/08-starrocks/04-deploy-be-hybrid.sh) — 기존 FE에 BE(로컬 XFS) 추가 등록, 하이브리드 구성. `scripts/07-ceph-storage/12-resplit-osd-disk.sh`로 XFS 파티션 준비 필요
