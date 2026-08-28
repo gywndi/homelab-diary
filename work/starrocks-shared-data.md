@@ -39,6 +39,7 @@ FE는 메타데이터(DB/테이블 정의, 트랜잭션 로그)를 자체 로컬
 - [x] **BE·CN 둘 다 3노드 대칭 구성으로 확장 (2026-08-28)** — chan09/llm001에도 각각 BE·CN 추가 배포(`02-deploy-cn.sh`/`04-deploy-be-hybrid.sh`를 이름/노드만 바꿔 반복 실행하는 패턴, 별도 파라미터화된 스크립트는 아직 없음). 대용량+MPP 비교의 전제 조건
 - [x] **대용량(1000만 행) 로드 + 3-way JOIN(MPP) 비교 완료 (2026-08-28)** — 상세는 [StarRocks 아키텍처](starrocks-architecture.md#대용량-로드--복잡한-조인mpp-비교-2026-08-28-검증-완료) 참고
 - [x] **고카디널리티 데이터로 재검증 완료 (2026-08-28)** — 1000만 행에서 CN이 22% 느린 것 확인(1GbE 병목 최초 관측), 3000만 행에서는 데이터 생성 자체의 CPU 비용이 병목이 되며 차이가 다시 사라짐. 상세는 [StarRocks 아키텍처](starrocks-architecture.md#고카디널리티-데이터로-재검증-2026-08-28-검증-완료) 참고
+- [x] **STREAM LOAD(사전 생성 파일)로 순수 I/O 비교 완료 (2026-08-28)** — CPU 비용을 완전히 분리하니 결과가 뒤집혀 CN이 17% 빠름. 상세는 [StarRocks 아키텍처](starrocks-architecture.md#stream-load사전-생성-파일로-순수-io-비교-2026-08-28-검증-완료) 참고
 
 ## 스크립트 목록
 
@@ -50,3 +51,4 @@ FE는 메타데이터(DB/테이블 정의, 트랜잭션 로그)를 자체 로컬
 - [`05-crud-benchmark.sh`](../scripts/08-starrocks/05-crud-benchmark.sh) — shared-nothing(BE) vs shared-data(CN) 소량 CRUD 성능 비교. 결과는 [StarRocks 아키텍처](starrocks-architecture.md#shared-nothing-vs-shared-data-crud-성능-비교-2026-08-28-검증-완료) 참고
 - [`06-mpp-benchmark.sh`](../scripts/08-starrocks/06-mpp-benchmark.sh) — 대용량(1000만 행) 로드 + 스타 스키마 3-way JOIN(MPP) 비교. 결과는 [StarRocks 아키텍처](starrocks-architecture.md#대용량-로드--복잡한-조인mpp-비교-2026-08-28-검증-완료) 참고
 - [`07-high-cardinality-benchmark.sh`](../scripts/08-starrocks/07-high-cardinality-benchmark.sh) — 저카디널리티 데이터의 압축 효율 문제를 우회하기 위해 행마다 ~256바이트 랜덤 payload를 추가한 버전. 결과는 [StarRocks 아키텍처](starrocks-architecture.md#고카디널리티-데이터로-재검증-2026-08-28-검증-완료) 참고
+- [`08-stream-load-benchmark.sh`](../scripts/08-starrocks/08-stream-load-benchmark.sh) — 사전 생성 CSV 파일 + STREAM LOAD로 데이터 생성 CPU 비용을 완전히 분리한 순수 쓰기 I/O 비교. 결과는 [StarRocks 아키텍처](starrocks-architecture.md#stream-load사전-생성-파일로-순수-io-비교-2026-08-28-검증-완료) 참고
