@@ -11,7 +11,7 @@ Rook-Ceph(v1.20.6) Operator로 배포했다 — Ceph 자체를 수동으로 설�
 3. **Rook operator 설치** — CRD + operator 배포
 4. **CephCluster 생성** — mon 3 + mgr 1 + OSD 3(노드별 디바이스 명시), hostNetwork
 5. **CephBlockPool + StorageClass** — RBD 풀(3-replica) + exclusive-lock
-6. **CephObjectStore** — RGW + MetalLB VIP 노출
+6. **CephObjectStore** — RGW + MetalLB VIP 노출. `gateway.instances`는 처음 1로 시작했다가, StarRocks 동시성 벤치마크 과정에서 3(노드당 1개)으로 늘렸다 — 다만 실측으로는 이게 동시성 병목의 주된 원인은 아니었다([StarRocks BMT](starrocks-bmt.md) "RGW 게이트웨이를 3개로" 섹션 참고)
 7. **MySQL을 RBD PVC 기반 k8s 워크로드로 컷오버**
 8. **디스크 재분할** — Ceph 고정 300G + 나머지 XFS(StarRocks BE용, 아래 상세 설명)
 

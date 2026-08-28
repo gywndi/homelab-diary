@@ -24,7 +24,7 @@ spec:
   gateway:
     # Ceph RGW 기본 포트. 80/443은 ingress-nginx가 쓰므로 충돌 방지
     port: 7480
-    instances: 1
+    instances: 3
     priorityClassName: system-cluster-critical
   healthCheck:
     startupProbe:

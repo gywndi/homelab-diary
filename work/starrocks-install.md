@@ -18,7 +18,8 @@
 3. CN 배포 + FE 등록, `SHOW BACKENDS`/`SHOW COMPUTE NODES`로 Alive 확인
 4. end-to-end 검증 — 테이블 생성 + INSERT + SELECT, RGW 버킷 오브젝트 수 증가로 실제 저장 확인
 5. 3노드 대칭 구성으로 확장 — chan09/llm001에도 각각 CN 추가(`02-deploy-cn.sh`를 이름/노드만 바꿔 반복 실행)
-6. FE 코디네이터 병목 실험을 위해 Follower FE 2개(fe2/fe3) 추가 — `ALTER SYSTEM ADD FOLLOWER`로 리더에 먼저 등록 후 `--helper` 플래그로 기동
+6. FE 코디네이터 병목 실험을 위해 Follower FE 2개(fe2/fe3) 추가 — `ALTER SYSTEM ADD FOLLOWER`로 리더에 먼저 등록 후 `--helper` 플래그로 기동. 실측 결과 개선 효과가 없어 이후 `ALTER SYSTEM DROP FOLLOWER` + 리소스 삭제로 원복(다시 FE 1개)
+7. FE를 코어 수가 가장 많은 노드(llm001, 12코어 vs 나머지 6코어)로 이동 — `kubectl patch deployment fe`로 `nodeSelector` 추가. 동시성 처리량이 크게 개선됨(상세는 [BMT](starrocks-bmt.md) 참고)
 
 ## shared-nothing 배포 (`starrocks-sn` 네임스페이스)
 
