@@ -32,7 +32,7 @@ StarRocks 컴퓨팅/스토리지 분리 구성을 테스트해보는 게 원래 
 ### BE (Backend) — shared-nothing 데이터 평면
 
 - 로컬 디스크에 테이블 데이터를 직접 저장(replication_num만큼 다른 BE로 복제).
-- shared-data(`run_mode=shared_data`) 클러스터에도 `ALTER SYSTEM ADD BACKEND`로 BE를 등록하는 것 자체는 되지만, **그렇게 만든 테이블도 여전히 cloud-native(RGW 기반)로 만들어진다** — `run_mode`가 shared_data인 이상 테이블 속성(`replication_num` 등)과 무관하게 전부 cloud-native다. 진짜 로컬 저장을 쓰려면 `run_mode`를 지정하지 않은(기본값) 별도 FE가 필요하다. 이건 이번 검증 과정에서 뒤늦게 발견한 함정이라 [BMT 문서](starrocks-bmt.md)에 자세히 남겨뒀다.
+- shared-data(`run_mode=shared_data`) 클러스터에도 `ALTER SYSTEM ADD BACKEND`로 BE를 등록하는 것 자체는 되지만, **그렇게 만든 테이블도 여전히 cloud-native(RGW 기반)로 만들어진다** — `run_mode`가 shared_data인 이상 테이블 속성(`replication_num` 등)과 무관하게 전부 cloud-native다. 진짜 로컬 저장을 쓰려면 `run_mode`를 지정하지 않은(기본값) 별도 FE가 필요하다. `SHOW CREATE TABLE`에 `storage_volume` 속성이 있는지로 구분한다 — 자세한 확인 방법은 [사용쿼리 예시](starrocks-query-examples.md) 참고.
 
 ### CN (Compute Node) — shared-data 데이터 평면
 
@@ -89,6 +89,6 @@ FE가 곧 Coordinator라는 점이 중요하다 — 동시 쿼리가 몰리면 C
 | CN 로컬 캐시 | 파드 로컬 디스크(현재 emptyDir, 영구 아님) | 파드 재시작 시 캐시 소실 |
 | Compaction 실행 주체 | CN | — |
 | CN/BE 등록 | `ALTER SYSTEM ADD COMPUTE NODE` / `ADD BACKEND` (headless Service FQDN) | IP로 등록하면 파드 재시작마다 깨짐(실제로 겪음) |
-| 진짜 shared-nothing 검증용 | 별도 네임스페이스(`starrocks-sn`)에 별도 FE(`run_mode` 미지정) + BE 3개 | shared-data FE에 등록한 BE는 cloud-native였다는 걸 뒤늦게 발견, 완전히 새 클러스터로 재구성 |
+| 진짜 shared-nothing 검증용 | 별도 네임스페이스(`starrocks-sn`)에 별도 FE(`run_mode` 미지정) + BE 3개 | `run_mode`가 클러스터 생성 시 고정이라 완전히 별도 클러스터로 구성 |
 
 설치 방법은 [설치](starrocks-install.md), 실측 벤치마크와 이번 검증에서 발견한 함정은 [BMT](starrocks-bmt.md), SQL 예시는 [사용쿼리 예시](starrocks-query-examples.md), 실제 동작하는 클라이언트 코드는 [어플리케이션 샘플](starrocks-app-sample.md) 참고.

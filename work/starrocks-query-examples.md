@@ -108,7 +108,7 @@ SHOW PROC '/frontends';   -- SHOW FRONTENDS와 유사, 스크립트에서 파싱
 SHOW CREATE TABLE my_table\G
 ```
 
-`"storage_volume" = "builtin_storage_volume"` / `"datacache.enable" = "true"`가 있으면 cloud-native(RGW 기반). `"replicated_storage" = "true"`만 있고 `storage_volume`이 없으면 classic OLAP(로컬 저장). `replication_num` 프로퍼티를 지정했다고 해서 로컬이라고 착각하지 말 것 — [BMT 문서](starrocks-bmt.md)의 정정 사례 참고.
+`"storage_volume" = "builtin_storage_volume"` / `"datacache.enable" = "true"`가 있으면 cloud-native(RGW 기반). `"replicated_storage" = "true"`만 있고 `storage_volume`이 없으면 classic OLAP(로컬 저장). `replication_num` 프로퍼티를 지정했다고 해서 로컬이라고 착각하지 말 것 — 클러스터의 `run_mode`가 shared_data면 테이블 속성과 무관하게 전부 cloud-native다.
 
 ## 노드/클러스터 관리
 

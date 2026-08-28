@@ -2,7 +2,7 @@
 
 > 이 문서는 초안이다. 검증까지 끝나면 `lessons/`로 옮겨 다듬는다. 아키텍처 배경 지식은 [StarRocks 소개](starrocks-intro.md) 참고. 전제 조건: [Ceph 설치](ceph-install.md)에서 RGW(오브젝트 스토리지)가 이미 배포되어 있어야 한다.
 
-두 개의 서로 다른 클러스터를 배포했다 — ① `starrocks` 네임스페이스: shared-data(FE + CN, RGW 기반), ② `starrocks-sn` 네임스페이스: 진짜 shared-nothing(FE + BE, 로컬 XFS 기반). 처음엔 ①만 있었는데, ①에 BE를 추가해도 여전히 cloud-native라는 걸 뒤늦게 발견해서 ②를 별도로 새로 만들었다(경위는 [BMT](starrocks-bmt.md) 참고).
+두 개의 서로 다른 클러스터를 배포했다 — ① `starrocks` 네임스페이스: shared-data(FE + CN, RGW 기반), ② `starrocks-sn` 네임스페이스: 진짜 shared-nothing(FE + BE, 로컬 XFS 기반). `run_mode`가 클러스터 생성 시 고정되고 나중에 못 바꾸기 때문에(아래 이슈 참고), 두 모드를 비교하려면 완전히 별도의 FE가 필요했다.
 
 ## 설계 결정
 
