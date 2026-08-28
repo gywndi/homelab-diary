@@ -240,7 +240,18 @@ ORDER BY 4 DESC LIMIT 20;
 
 **단발 측정 때의 68% 격차가 지속 반복 측정에서는 13%로 크게 좁혀졌다.** 즉 CRUD 비교의 큰 격차는 대부분 SN 클러스터의 콜드 스타트(막 기동한 BE, JIT/캐시 워밍업 부족) 노이즈였고, 정상 상태(steady state)에서의 실제 차이는 13% 수준이다. RGW(CN) 쪽이 그래도 약간 우세한 건 CN의 로컬 Data Cache가 반복 조회에 유리하게 작동하기 때문으로 보인다 — CN은 원래 "콜드는 느리고 웜은 빠르다"는 캐시 특성이 있는데(위 CN 섹션 참고), 200회 반복이면 첫 1~2회 이후로는 계속 웜 상태를 유지했을 것이다.
 
-스크립트: `09-deploy-sn-fe.sh`, `10-deploy-sn-be.sh`(노드별 반복), `11-real-sn-vs-shared-data-benchmark.sh`(STREAM LOAD), `12-real-sn-vs-shared-data-crud.sh`, `13-real-sn-vs-shared-data-mpp.sh`, `14-real-sn-vs-shared-data-agg-tps.sh`(그룹핑 쿼리 TPS)
+### 동시 처리(concurrency) 위주 재검증 (2026-08-28 검증 완료)
+
+위 TPS 측정은 전부 **단일 커넥션 직렬** 반복이었다 — 서버가 동시 요청을 얼마나 잘 흡수하는지는 안 보여준다. 그래서 한 파드 안에서 mysql 클라이언트 프로세스 20개를 동시에 띄우고(각자 20회씩, 총 400건) 벽시계 시간 기준 합산 QPS를 측정했다.
+
+| 클러스터 | 동시 20커넥션 × 20회(총 400건) | 소요 | QPS |
+|---|---|---|---|
+| 진짜 로컬(SN) | 400건 | 1.27초 | **315.5** |
+| 진짜 RGW(SD) | 400건 | 2.86초 | 140.1 |
+
+**뚜렷한 역전이다 — 로컬이 2.25배 빠르다.** 직렬 반복(13% RGW 우세)과 정반대 방향. CN은 쿼리마다(또는 캐시 미스마다) RGW로 네트워크 왕복을 해야 하는데, 동시 요청이 몰리면 이 네트워크 경로 자체가 공유 병목이 되어 요청들이 서로 대기하게 되는 것으로 보인다. 반면 로컬 디스크(BE 3개, 각자 다른 노드)는 요청을 노드별로 병렬 분산 처리할 수 있어 동시성 증가를 더 잘 흡수한다. **동시성이 커질수록 shared-nothing의 구조적 이점이 드러난다**는, 아키텍처적으로 설명 가능한 결과.
+
+스크립트: `09-deploy-sn-fe.sh`, `10-deploy-sn-be.sh`(노드별 반복), `11-real-sn-vs-shared-data-benchmark.sh`(STREAM LOAD), `12-real-sn-vs-shared-data-crud.sh`, `13-real-sn-vs-shared-data-mpp.sh`, `14-real-sn-vs-shared-data-agg-tps.sh`(직렬 TPS), `15-real-sn-vs-shared-data-agg-concurrent-tps.sh`(동시 처리 TPS)
 
 ## 검증하고 싶은 것 (다음 단계 후보)
 
