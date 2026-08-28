@@ -229,7 +229,18 @@ ORDER BY 4 DESC LIMIT 20;
 
 **해석**: 이번엔 뚜렷한 일방적 승자가 없다. 대량 순수 쓰기(STREAM LOAD, INSERT)에서는 로컬이 앞서는데, 소규모 point/집계/UPDATE/DELETE에서는 오히려 RGW 쪽이 빠르다 — 이건 막 만든 SN 클러스터(BE가 기동한 지 몇 분 안 됨, JIT/캐시 워밍업 부족)와 Primary Key 테이블의 델리트 벡터 처리 경로 차이가 섞여 있을 가능성이 있어 추가 검증이 필요하다. 다만 "측정 방법(쓰기 패턴, 데이터 규모)에 따라 결론이 갈린다"는 이전까지의 큰 그림은 여전히 유효하다 — 다만 이제는 **진짜** 스토리지 아키텍처 차이를 보고 있다는 게 다르다.
 
-스크립트: `09-deploy-sn-fe.sh`, `10-deploy-sn-be.sh`(노드별 반복), `11-real-sn-vs-shared-data-benchmark.sh`(STREAM LOAD), `12-real-sn-vs-shared-data-crud.sh`, `13-real-sn-vs-shared-data-mpp.sh`
+### 소규모 그룹핑 쿼리 TPS 재검증 (2026-08-28 검증 완료)
+
+위 CRUD 비교의 집계 쿼리(`GROUP BY category`)는 딱 1번만 측정해서 워밍업/콜드 스타트 노이즈에 취약하다는 의심이 있었다 — 그래서 동일 쿼리를 200회 연속 실행해(30만 행 테이블, 단일 커넥션 직렬 실행) 평균 지연시간과 QPS(TPS)를 다시 냈다.
+
+| 클러스터 | 200회 총 소요 | 평균 지연 | QPS |
+|---|---|---|---|
+| 진짜 로컬(SN) | 3.79초 | 18.95ms | 52.8 |
+| 진짜 RGW(SD) | 3.34초 | 16.72ms | **59.8** |
+
+**단발 측정 때의 68% 격차가 지속 반복 측정에서는 13%로 크게 좁혀졌다.** 즉 CRUD 비교의 큰 격차는 대부분 SN 클러스터의 콜드 스타트(막 기동한 BE, JIT/캐시 워밍업 부족) 노이즈였고, 정상 상태(steady state)에서의 실제 차이는 13% 수준이다. RGW(CN) 쪽이 그래도 약간 우세한 건 CN의 로컬 Data Cache가 반복 조회에 유리하게 작동하기 때문으로 보인다 — CN은 원래 "콜드는 느리고 웜은 빠르다"는 캐시 특성이 있는데(위 CN 섹션 참고), 200회 반복이면 첫 1~2회 이후로는 계속 웜 상태를 유지했을 것이다.
+
+스크립트: `09-deploy-sn-fe.sh`, `10-deploy-sn-be.sh`(노드별 반복), `11-real-sn-vs-shared-data-benchmark.sh`(STREAM LOAD), `12-real-sn-vs-shared-data-crud.sh`, `13-real-sn-vs-shared-data-mpp.sh`, `14-real-sn-vs-shared-data-agg-tps.sh`(그룹핑 쿼리 TPS)
 
 ## 검증하고 싶은 것 (다음 단계 후보)
 
@@ -241,5 +252,6 @@ ORDER BY 4 DESC LIMIT 20;
 - [x] ~~CN을 2개로 늘려서~~ → BE·CN 둘 다 3노드 대칭 구성으로 확장 완료(위 섹션). 3-way JOIN + 집계가 100~200ms대로 끝난 것으로 병렬 처리 자체는 체감했으나, tablet 분산/실행계획(EXPLAIN)으로 직접 확인은 아직 안 함
 - [ ] Vacuum이 오래된 버전을 실제로 지우는지 — RGW 버킷 오브젝트 수 변화로 확인
 - [x] ~~Primary Key 테이블로 실시간 갱신 테스트~~ → CRUD 비교에서 완료 (UPDATE/DELETE 정상 동작 확인)
-- [ ] 진짜 shared-nothing 클러스터의 point/집계/UPDATE/DELETE가 RGW보다 느렸던 이유 규명 — 갓 기동한 클러스터의 워밍업 부족인지, Primary Key 델리트 벡터 처리 경로 자체의 구조적 차이인지 반복 측정으로 분리 필요
+- [x] ~~진짜 shared-nothing 클러스터의 집계 쿼리가 RGW보다 느렸던 이유 규명~~ → 200회 반복 TPS로 확인, 대부분 워밍업 노이즈였고 정상 상태 격차는 68%→13%로 축소(위 "소규모 그룹핑 쿼리 TPS 재검증" 섹션)
+- [ ] point/UPDATE/DELETE도 동일하게 반복 측정으로 워밍업 vs 구조적 차이 분리 — 집계만 확인했고 나머지는 아직 단발 측정 상태
 - [ ] `starrocks-sn` `replication_num=1`(진짜 로컬 전용, 네트워크 복제 없음)로 STREAM LOAD 재비교 — 지금은 replication_num=2라 두 번째 복제본의 네트워크 비용이 여전히 섞여 있음
