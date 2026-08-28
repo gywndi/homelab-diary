@@ -91,4 +91,4 @@ FE가 곧 Coordinator라는 점이 중요하다 — 동시 쿼리가 몰리면 C
 | CN/BE 등록 | `ALTER SYSTEM ADD COMPUTE NODE` / `ADD BACKEND` (headless Service FQDN) | IP로 등록하면 파드 재시작마다 깨짐(실제로 겪음) |
 | 진짜 shared-nothing 검증용 | 별도 네임스페이스(`starrocks-sn`)에 별도 FE(`run_mode` 미지정) + BE 3개 | `run_mode`가 클러스터 생성 시 고정이라 완전히 별도 클러스터로 구성 |
 
-설치 방법은 [설치](starrocks-install.md), 실측 벤치마크와 이번 검증에서 발견한 함정은 [BMT](starrocks-bmt.md), SQL 예시는 [사용쿼리 예시](starrocks-query-examples.md), 실제 동작하는 클라이언트 코드는 [어플리케이션 샘플](starrocks-app-sample.md) 참고.
+설치 방법은 [설치](starrocks-install.md), 실측 벤치마크와 이번 검증에서 발견한 함정은 [BMT](starrocks-bmt.md), SQL 예시는 [사용쿼리 예시](starrocks-query-examples.md), 실제 동작하는 클라이언트 코드는 [어플리케이션 샘플](starrocks-app-sample.md), 프로덕션 운영 사례 기반 튜닝 포인트는 [튜닝 포인트](starrocks-tuning.md) 참고.
