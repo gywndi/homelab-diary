@@ -40,6 +40,7 @@ FE는 메타데이터(DB/테이블 정의, 트랜잭션 로그)를 자체 로컬
 - [x] **대용량(1000만 행) 로드 + 3-way JOIN(MPP) 비교 완료 (2026-08-28)** — 상세는 [StarRocks 아키텍처](starrocks-architecture.md#대용량-로드--복잡한-조인mpp-비교-2026-08-28-검증-완료) 참고
 - [x] **고카디널리티 데이터로 재검증 완료 (2026-08-28)** — 1000만 행에서 CN이 22% 느린 것 확인(1GbE 병목 최초 관측), 3000만 행에서는 데이터 생성 자체의 CPU 비용이 병목이 되며 차이가 다시 사라짐. 상세는 [StarRocks 아키텍처](starrocks-architecture.md#고카디널리티-데이터로-재검증-2026-08-28-검증-완료) 참고
 - [x] **STREAM LOAD(사전 생성 파일)로 순수 I/O 비교 완료 (2026-08-28)** — CPU 비용을 완전히 분리하니 결과가 뒤집혀 CN이 17% 빠름. 상세는 [StarRocks 아키텍처](starrocks-architecture.md#stream-load사전-생성-파일로-순수-io-비교-2026-08-28-검증-완료) 참고
+- [x] **⚠️ 정정: 위 "BE(로컬)" 비교가 전부 cloud-native끼리의 비교였다는 걸 발견, 진짜 shared-nothing 클러스터 신규 배포 후 재비교 완료 (2026-08-28)** — `run_mode=shared_data` FE에서는 replication_num을 지정해도 모든 테이블이 cloud-native(RGW)로 만들어진다는 걸 뒤늦게 확인. 별도 네임스페이스(`starrocks-sn`)에 진짜 shared-nothing FE+BE 3개를 새로 배포해 CRUD/대용량+MPP/STREAM LOAD를 전부 재실행했다. 상세는 [StarRocks 아키텍처](starrocks-architecture.md#️-중요한-정정-지금까지의-be로컬-vs-cn공유-비교는-전부-cloud-native끼리의-비교였다-2026-08-28) 참고
 
 ## 스크립트 목록
 
@@ -52,3 +53,8 @@ FE는 메타데이터(DB/테이블 정의, 트랜잭션 로그)를 자체 로컬
 - [`06-mpp-benchmark.sh`](../scripts/08-starrocks/06-mpp-benchmark.sh) — 대용량(1000만 행) 로드 + 스타 스키마 3-way JOIN(MPP) 비교. 결과는 [StarRocks 아키텍처](starrocks-architecture.md#대용량-로드--복잡한-조인mpp-비교-2026-08-28-검증-완료) 참고
 - [`07-high-cardinality-benchmark.sh`](../scripts/08-starrocks/07-high-cardinality-benchmark.sh) — 저카디널리티 데이터의 압축 효율 문제를 우회하기 위해 행마다 ~256바이트 랜덤 payload를 추가한 버전. 결과는 [StarRocks 아키텍처](starrocks-architecture.md#고카디널리티-데이터로-재검증-2026-08-28-검증-완료) 참고
 - [`08-stream-load-benchmark.sh`](../scripts/08-starrocks/08-stream-load-benchmark.sh) — 사전 생성 CSV 파일 + STREAM LOAD로 데이터 생성 CPU 비용을 완전히 분리한 순수 쓰기 I/O 비교. 결과는 [StarRocks 아키텍처](starrocks-architecture.md#stream-load사전-생성-파일로-순수-io-비교-2026-08-28-검증-완료) 참고
+- [`09-deploy-sn-fe.sh`](../scripts/08-starrocks/09-deploy-sn-fe.sh) — 진짜 shared-nothing(run_mode 기본값) FE를 별도 네임스페이스(`starrocks-sn`)에 배포. RGW/S3 설정 전혀 없음
+- [`10-deploy-sn-be.sh`](../scripts/08-starrocks/10-deploy-sn-be.sh) — `starrocks-sn` FE에 로컬 스토리지 BE 등록. 기존 XFS 파티션의 하위 디렉토리(`sn-data`)를 써서 기존 shared-data BE의 datacache와 분리. 노드별로 반복 실행(`<노드> <접미사>`)
+- [`11-real-sn-vs-shared-data-benchmark.sh`](../scripts/08-starrocks/11-real-sn-vs-shared-data-benchmark.sh) — 진짜 shared-nothing vs 진짜 shared-data STREAM LOAD 재비교
+- [`12-real-sn-vs-shared-data-crud.sh`](../scripts/08-starrocks/12-real-sn-vs-shared-data-crud.sh) — 진짜 shared-nothing vs 진짜 shared-data CRUD 재비교
+- [`13-real-sn-vs-shared-data-mpp.sh`](../scripts/08-starrocks/13-real-sn-vs-shared-data-mpp.sh) — 진짜 shared-nothing vs 진짜 shared-data 대용량 로드 + MPP JOIN 재비교. 결과는 모두 [StarRocks 아키텍처](starrocks-architecture.md#️-중요한-정정-지금까지의-be로컬-vs-cn공유-비교는-전부-cloud-native끼리의-비교였다-2026-08-28) 참고

@@ -19,7 +19,9 @@ MPP(대규모 병렬 처리) 방식의 컬럼형 OLAP 데이터베이스. FE(제
 
 우리가 shared-data를 택한 이유는 애초에 "컴퓨팅/스토리지 분리"를 테스트하는 게 목적이었기 때문 — Ceph를 도입한 동기 자체가 이 모드를 쓰기 위해서였다.
 
-## 하이브리드: BE(로컬)와 CN(공유)을 같은 클러스터에서 동시에 (2026-08-28 검증 완료)
+## 하이브리드: BE(로컬)와 CN(공유)을 같은 클러스터에서 동시에 (2026-08-28 검증 완료, ⚠️ 아래에서 정정됨)
+
+> **정정(2026-08-28)**: 이 섹션의 핵심 주장("BE로 라우팅되면 로컬 저장")은 틀렸다 — 실제로는 이 BE 테이블도 cloud-native(RGW 기반)였다. 원문은 기록 목적으로 남겨두고, 자세한 내용과 진짜 검증 결과는 아래 [⚠️ 중요한 정정](#️-중요한-정정-지금까지의-be로컬-vs-cn공유-비교는-전부-cloud-native끼리의-비교였다-2026-08-28) 섹션 참고.
 
 **공식 문서에는 "shared-nothing과 shared-data 혼합 배포는 지원하지 않는다"는 문구가 있는데, 실제로 검증해보니 이건 "클러스터 생성 후 run_mode를 나중에 바꾸는 것(전환)"에 대한 제약으로 보인다.** `run_mode=shared_data`로 처음부터 띄운 FE에 `ALTER SYSTEM ADD BACKEND`로 BE를 등록하는 건 실제로 됐다 — 별도 FE/클러스터를 새로 만들 필요가 없었다.
 
@@ -102,6 +104,9 @@ flowchart LR
 
 ## shared-nothing vs shared-data CRUD 성능 비교 (2026-08-28 검증 완료)
 
+> **정정(2026-08-28)**: 여기서 "shared-nothing(BE)"이라 부른 쪽도 실제로는 cloud-native(RGW 기반)였다 — 진짜 로컬 스토리지와의 재비교는 [⚠️ 중요한 정정](#️-중요한-정정-지금까지의-be로컬-vs-cn공유-비교는-전부-cloud-native끼리의-비교였다-2026-08-28) 섹션 참고.
+
+
 BE(로컬, 3노드에 각 1개씩 배포 + `replication_num=2`) vs CN(RGW, size=2)에 동일한 Primary Key 테이블/데이터로 CRUD 시퀀스를 돌려 비교했다. `SELECT NOW(6)`로 각 단계 전후를 감싸서 서버 사이드 시간만 측정(클라이언트 파드 기동 오버헤드 제외).
 
 | CRUD 작업 | shared-nothing (BE, 2-replica) | shared-data (CN, RGW size=2) |
@@ -117,6 +122,9 @@ BE(로컬, 3노드에 각 1개씩 배포 + `replication_num=2`) vs CN(RGW, size=
 **해석**: 이 정도 데이터 규모에선 스토리지 계층(1GbE Ceph vs 로컬 XFS)이 병목이 아니라 FE의 쿼리 플래닝/실행 오버헤드가 더 지배적인 것으로 보인다. 앞서 확인한 Ceph 쓰기 병목(86MB/s)이 실제로 체감되려면 데이터 규모가 훨씬 커야(수백 MB~GB 단위) 할 것 — 소량 CRUD로는 스토리지 계층 차이가 거의 안 드러난다는 게 이번 테스트의 진짜 발견이다.
 
 ## 대용량 로드 + 복잡한 조인(MPP) 비교 (2026-08-28 검증 완료)
+
+> **정정(2026-08-28)**: 여기서 "shared-nothing(BE)"이라 부른 쪽도 실제로는 cloud-native(RGW 기반)였다 — 진짜 로컬 스토리지와의 재비교는 [⚠️ 중요한 정정](#️-중요한-정정-지금까지의-be로컬-vs-cn공유-비교는-전부-cloud-native끼리의-비교였다-2026-08-28) 섹션 참고.
+
 
 위 결과가 "소량이라 차이가 안 보인 것 아니냐"는 의문이 남아서, 이번엔 진짜 큰 규모(1000만 행 fact 테이블)와 스타 스키마(fact + dimension 2개) 3-way JOIN으로 다시 비교했다. shared-data 쪽도 BE와 동일하게 CN을 chan09/llm001에 추가해 **3노드 대칭 구성**(BE 3개 vs CN 3개)으로 맞췄다.
 
@@ -144,6 +152,9 @@ ORDER BY 4 DESC LIMIT 20;
 
 ## 고카디널리티 데이터로 재검증 (2026-08-28 검증 완료)
 
+> **정정(2026-08-28)**: 여기서 "shared-nothing(BE)"이라 부른 쪽도 실제로는 cloud-native(RGW 기반)였다 — 진짜 로컬 스토리지와의 재비교는 [⚠️ 중요한 정정](#️-중요한-정정-지금까지의-be로컬-vs-cn공유-비교는-전부-cloud-native끼리의-비교였다-2026-08-28) 섹션 참고.
+
+
 저카디널리티(`id % N`) 데이터는 컬럼 압축이 너무 잘 먹혀서 병목이 안 보였다는 가설을 확인하기 위해, 행마다 MD5 해시 8개를 이어붙인 ~256바이트짜리 사실상 무작위 `payload` 컬럼을 추가해 재시도했다.
 
 | 규모 | shared-nothing (BE) | shared-data (CN) | 차이 |
@@ -157,6 +168,9 @@ ORDER BY 4 DESC LIMIT 20;
 **원인 추정**: `INSERT ... SELECT`로 `MD5(CONCAT(id,RAND()))`를 행마다 8번씩 서버 사이드에서 계산하는데, 3000만 행이면 2.4억 번의 MD5 연산이 필요하다 — 이 규모에서는 순수 스토리지 I/O가 아니라 **데이터 생성 자체의 CPU 비용이 병목**이 되어 두 방식의 차이를 가린 것으로 보인다. 즉 이 벤치마크 방법론(서버에서 즉석으로 무거운 함수를 실행해 데이터를 생성)은 일정 규모를 넘어서면 "스토리지 I/O 비교"가 아니라 "CPU 비교"로 성격이 바뀐다는 한계가 있다. 진짜 대용량 스토리지 I/O 비교를 하려면 CPU 비용이 적은 방식(예: 미리 만들어둔 데이터를 그대로 복사/재삽입, 또는 STREAM LOAD로 외부에서 미리 생성한 파일을 로드)이 필요하다 — 다음 검증 후보로 남긴다.
 
 ## STREAM LOAD(사전 생성 파일)로 순수 I/O 비교 (2026-08-28 검증 완료)
+
+> **정정(2026-08-28)**: 여기서 "shared-nothing(BE)"이라 부른 쪽도 실제로는 cloud-native(RGW 기반)였다 — 진짜 로컬 스토리지와의 재비교는 [⚠️ 중요한 정정](#️-중요한-정정-지금까지의-be로컬-vs-cn공유-비교는-전부-cloud-native끼리의-비교였다-2026-08-28) 섹션 참고.
+
 
 `INSERT...SELECT` 방식은 서버 사이드에서 MD5를 계산하는 CPU 비용이 규모가 커지면 스토리지 I/O 비용을 가려버린다는 걸 앞에서 확인했다. 이번엔 데이터 생성을 완전히 분리했다 — Python으로 1000만 행 CSV(id, customer_id, product_id, quantity, ts, payload) 파일을 미리 만들어두고(2.8GB, 생성에 171초 걸렸지만 이건 측정 대상이 아님), `STREAM LOAD`(HTTP PUT 기반 벌크 로드)로 순수 파싱+쓰기 시간만 측정했다.
 
@@ -176,13 +190,56 @@ ORDER BY 4 DESC LIMIT 20;
 
 측정 방법에 따라 결론이 뒤집힐 수 있다는 것 자체가 이번 벤치마크 시리즈의 가장 큰 교훈이다.
 
+## ⚠️ 중요한 정정: 지금까지의 "BE(로컬) vs CN(공유)" 비교는 전부 cloud-native끼리의 비교였다 (2026-08-28)
+
+시간 단위 파티션(`PARTITION BY RANGE(...) EVERY(INTERVAL 1 HOUR)`)을 테스트하다가 발견했다. `replication_num`을 지정해 만든 "BE(로컬)" 테이블의 `SHOW CREATE TABLE`을 다시 열어보니 `"storage_volume" = "builtin_storage_volume"`, `"datacache.enable" = "true"`가 붙어 있었다 — **cloud-native(RGW 기반) 테이블이라는 표시**다. 확인해보니:
+
+- BE 로컬 스토리지 경로(`/mnt/starrocks-be/data`)가 **0바이트**였다. `datacache`(로컬 캐시, 4.2GB)만 있었다.
+- 세션 최초 검증 테이블(`t1`)도 동일하게 cloud-native였다.
+
+원인은 `run_mode = shared_data`로 띄운 FE는 **테이블 속성과 무관하게 CREATE TABLE이 항상 cloud-native로 만들어진다**는 것 — 공식 문서로 재확인:
+
+> "Mixed deployment of shared-nothing and shared-data mode is not supported, and the transformation from a shared-nothing cluster to a shared-data cluster or vice versa is not supported." — [S3용 shared-data 배포](https://docs.starrocks.io/docs/deployment/shared_data/s3/)
+> "local disk serves as Data Cache, not primary storage" — [shared-data FAQ](https://docs.starrocks.io/docs/faq/shared_data_faq/)
+
+즉 위 "하이브리드 BE+CN 검증"부터 "STREAM LOAD 순수 I/O 비교"까지 이 문서에 기록한 모든 "shared-nothing vs shared-data" 비교는 실제로는 **"cloud-native 테이블을 BE 프로세스가 실행 vs CN 프로세스가 실행"**의 차이였다 — 스토리지 위치(로컬 XFS vs RGW) 차이가 전혀 아니었다. 위 섹션들은 오류가 있었다는 걸 알리기 위해 원문 그대로 남겨두고, 이 섹션에서 정정한다.
+
+### 진짜 shared-nothing 클러스터를 별도로 배포
+
+`run_mode`은 클러스터 생성 시 고정되고 나중에 바꿀 수 없어서, 기존 클러스터를 고치는 게 아니라 **완전히 새로운 FE를 새 네임스페이스(`starrocks-sn`)에 `run_mode` 지정 없이(기본값 = shared-nothing)** 배포했다. BE 3개(chan08/chan09/llm001)는 기존 XFS 파티션의 하위 디렉토리(`/mnt/starrocks-be/sn-data`)를 써서, 기존 shared-data 클러스터의 datacache와 물리적으로 분리했다.
+
+같은 스키마로 다시 만든 테이블의 `SHOW CREATE TABLE`에는 `storage_volume`이 아예 없고 `"replicated_storage" = "true"`만 있다 — 진짜 classic OLAP 테이블 표시. 데이터를 넣은 뒤 노드의 `/mnt/starrocks-be/sn-data/data`에 실제로 912KB가 쌓인 것도 3노드 전부에서 확인했고, `SHOW TABLET`도 cloud-native와 다른 스키마(태블릿마다 `ReplicaId`가 있고 replication_num만큼 여러 행)로 나와 진짜 3-replica 로컬 저장임을 재확인했다.
+
+시간 파티션 자체는 정상 동작한다 — `START/END/EVERY`로 24개(1시간 단위) 파티션을 한 번에 만들 수 있고, 각 파티션은 독립적으로 `DISTRIBUTED BY HASH(...) BUCKETS n`이 적용된다. 파티션 프루닝(쿼리가 특정 시간대만 스캔)과 버킷 단위 노드 분산(한 파티션 안에서도 여러 백엔드로 흩어짐)이 서로 완전히 독립적으로 동시에 작동하는 걸 `SHOW TABLET FROM t PARTITION(p...)`로 확인했다.
+
+### 정정된 재비교: 진짜 shared-nothing vs 진짜 shared-data
+
+동일한 스키마/쿼리로 `starrocks-sn`(진짜 로컬) vs `starrocks`(진짜 RGW, 기존 cloud-native 그대로 — 이쪽은 애초에 문제없었다)를 다시 측정했다.
+
+| 벤치마크 | 진짜 shared-nothing | 진짜 shared-data(RGW) | 우세 |
+|---|---|---|---|
+| CRUD — INSERT(30만 행) | 644.5ms | 700.7ms | SN 8% |
+| CRUD — SELECT(point) | 16.5ms | 7.5ms | SD 2배 |
+| CRUD — SELECT(집계) | 42.5ms | 25.2ms | SD 68% |
+| CRUD — UPDATE(upsert) | 203.4ms | 120.8ms | SD 68% |
+| CRUD — DELETE | 209.9ms | 146.6ms | SD 43% |
+| 대용량 로드(1000만 행) | 3.65초 | 3.92초 | SN 7% |
+| 3-way JOIN + 집계 + 정렬 | 113.9ms | 102.4ms | SD 10% |
+| STREAM LOAD(1000만 행, 사전 생성 파일) | 46.4초 | 54.4초 | **SN 15%** |
+
+**해석**: 이번엔 뚜렷한 일방적 승자가 없다. 대량 순수 쓰기(STREAM LOAD, INSERT)에서는 로컬이 앞서는데, 소규모 point/집계/UPDATE/DELETE에서는 오히려 RGW 쪽이 빠르다 — 이건 막 만든 SN 클러스터(BE가 기동한 지 몇 분 안 됨, JIT/캐시 워밍업 부족)와 Primary Key 테이블의 델리트 벡터 처리 경로 차이가 섞여 있을 가능성이 있어 추가 검증이 필요하다. 다만 "측정 방법(쓰기 패턴, 데이터 규모)에 따라 결론이 갈린다"는 이전까지의 큰 그림은 여전히 유효하다 — 다만 이제는 **진짜** 스토리지 아키텍처 차이를 보고 있다는 게 다르다.
+
+스크립트: `09-deploy-sn-fe.sh`, `10-deploy-sn-be.sh`(노드별 반복), `11-real-sn-vs-shared-data-benchmark.sh`(STREAM LOAD), `12-real-sn-vs-shared-data-crud.sh`, `13-real-sn-vs-shared-data-mpp.sh`
+
 ## 검증하고 싶은 것 (다음 단계 후보)
 
 - [x] ~~대용량(GB 단위) 데이터로 동일 CRUD 비교 재실행~~ → 1000만 행으로 재검증 완료(위 섹션). 여전히 차이 없음 — 저카디널리티 합성 데이터의 컬럼 압축 효율이 원인으로 추정
 - [x] ~~고카디널리티(랜덤/고유값 위주) 데이터로 GB 단위 재시도~~ → 1000만 행에서 병목 확인(CN 22% 느림), 3000만 행에서는 데이터 생성 자체의 CPU 비용이 병목이 되며 차이가 다시 사라짐(위 섹션)
 - [x] ~~CPU 비용이 적은 방식(사전 생성 데이터 재삽입, STREAM LOAD 등)으로 진짜 대용량 순수 스토리지 I/O 비교~~ → STREAM LOAD로 완료, 결과가 뒤집혀 CN이 17% 빠름(위 섹션)
-- [ ] **BE `replication_num=1`(진짜 로컬 전용, 네트워크 복제 없음)로도 STREAM LOAD 비교** — 지금까지는 BE도 항상 2-replica라 네트워크를 완전히 배제한 적이 없음. 순수 로컬 디스크 성능을 보려면 필요
+- [x] ~~BE `replication_num=1`(진짜 로컬 전용, 네트워크 복제 없음)로도 STREAM LOAD 비교~~ → 애초에 지금까지의 "BE"가 전부 cloud-native였다는 게 밝혀지면서 무의미해짐. 대신 진짜 shared-nothing 클러스터(`starrocks-sn`)를 새로 배포해 재비교 완료(위 "중요한 정정" 섹션)
 - [ ] Compaction이 실제로 도는 걸 관찰 — 작은 rowset을 여러 번 로드한 뒤 `SHOW TABLET`/compaction 관련 메트릭으로 확인
 - [x] ~~CN을 2개로 늘려서~~ → BE·CN 둘 다 3노드 대칭 구성으로 확장 완료(위 섹션). 3-way JOIN + 집계가 100~200ms대로 끝난 것으로 병렬 처리 자체는 체감했으나, tablet 분산/실행계획(EXPLAIN)으로 직접 확인은 아직 안 함
 - [ ] Vacuum이 오래된 버전을 실제로 지우는지 — RGW 버킷 오브젝트 수 변화로 확인
 - [x] ~~Primary Key 테이블로 실시간 갱신 테스트~~ → CRUD 비교에서 완료 (UPDATE/DELETE 정상 동작 확인)
+- [ ] 진짜 shared-nothing 클러스터의 point/집계/UPDATE/DELETE가 RGW보다 느렸던 이유 규명 — 갓 기동한 클러스터의 워밍업 부족인지, Primary Key 델리트 벡터 처리 경로 자체의 구조적 차이인지 반복 측정으로 분리 필요
+- [ ] `starrocks-sn` `replication_num=1`(진짜 로컬 전용, 네트워크 복제 없음)로 STREAM LOAD 재비교 — 지금은 replication_num=2라 두 번째 복제본의 네트워크 비용이 여전히 섞여 있음
