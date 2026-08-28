@@ -36,12 +36,15 @@ FE는 메타데이터(DB/테이블 정의, 트랜잭션 로그)를 자체 로컬
 - [x] CN(4.1.4) 배포 + FE 등록, Alive/OK 확인
 - [x] end-to-end 검증 — `bmt_test.t1` 테이블 생성 + INSERT + SELECT 성공, RGW 버킷 오브젝트 수 증가(34→44) 확인
 - [x] **하이브리드(BE+CN 동시) 검증 완료 (2026-08-28)** — 같은 FE에 BE(로컬 XFS)를 추가로 등록해 CN(RGW) 테이블과 BE(로컬) 테이블을 동시에 조회 성공. 상세는 [StarRocks 아키텍처](starrocks-architecture.md#하이브리드-be로컬와-cn공유을-같은-클러스터에서-동시에-2026-08-28-검증-완료) 참고
+- [x] **BE·CN 둘 다 3노드 대칭 구성으로 확장 (2026-08-28)** — chan09/llm001에도 각각 BE·CN 추가 배포(`02-deploy-cn.sh`/`04-deploy-be-hybrid.sh`를 이름/노드만 바꿔 반복 실행하는 패턴, 별도 파라미터화된 스크립트는 아직 없음). 대용량+MPP 비교의 전제 조건
+- [x] **대용량(1000만 행) 로드 + 3-way JOIN(MPP) 비교 완료 (2026-08-28)** — 상세는 [StarRocks 아키텍처](starrocks-architecture.md#대용량-로드--복잡한-조인mpp-비교-2026-08-28-검증-완료) 참고
 
 ## 스크립트 목록
 
 - [`00-create-rgw-user-and-bucket.sh`](../scripts/08-starrocks/00-create-rgw-user-and-bucket.sh) — RGW 유저/버킷 생성, k8s Secret 저장
 - [`01-deploy-fe.sh`](../scripts/08-starrocks/01-deploy-fe.sh) + [`fe.conf.template`](../scripts/08-starrocks/fe.conf.template) — FE 배포(headless Service + 고정 hostname)
-- [`02-deploy-cn.sh`](../scripts/08-starrocks/02-deploy-cn.sh) + [`cn.conf`](../scripts/08-starrocks/cn.conf) — CN 배포 + FE 등록
+- [`02-deploy-cn.sh`](../scripts/08-starrocks/02-deploy-cn.sh) + [`cn.conf`](../scripts/08-starrocks/cn.conf) — CN 배포 + FE 등록. 3노드 전체에 CN을 두려면 Deployment/Service 이름(`cn`→`cn2`/`cn3`)과 `nodeSelector`만 바꿔 반복 적용(아직 파라미터화 안 됨)
 - [`03-verify.sh`](../scripts/08-starrocks/03-verify.sh) — end-to-end 검증 (DB/테이블/INSERT/SELECT)
-- [`04-deploy-be-hybrid.sh`](../scripts/08-starrocks/04-deploy-be-hybrid.sh) — 기존 FE에 BE(로컬 XFS) 추가 등록, 하이브리드 구성. `scripts/07-ceph-storage/12-resplit-osd-disk.sh`로 XFS 파티션 준비 필요
-- [`05-crud-benchmark.sh`](../scripts/08-starrocks/05-crud-benchmark.sh) — shared-nothing(BE) vs shared-data(CN) CRUD 성능 비교. 결과는 [StarRocks 아키텍처](starrocks-architecture.md#shared-nothing-vs-shared-data-crud-성능-비교-2026-08-28-검증-완료) 참고
+- [`04-deploy-be-hybrid.sh`](../scripts/08-starrocks/04-deploy-be-hybrid.sh) — 기존 FE에 BE(로컬 XFS) 추가 등록, 하이브리드 구성. `scripts/07-ceph-storage/12-resplit-osd-disk.sh`로 XFS 파티션 준비 필요. 여러 노드에 두려면 CN과 마찬가지로 이름/노드를 바꿔 반복 적용
+- [`05-crud-benchmark.sh`](../scripts/08-starrocks/05-crud-benchmark.sh) — shared-nothing(BE) vs shared-data(CN) 소량 CRUD 성능 비교. 결과는 [StarRocks 아키텍처](starrocks-architecture.md#shared-nothing-vs-shared-data-crud-성능-비교-2026-08-28-검증-완료) 참고
+- [`06-mpp-benchmark.sh`](../scripts/08-starrocks/06-mpp-benchmark.sh) — 대용량(1000만 행) 로드 + 스타 스키마 3-way JOIN(MPP) 비교. 결과는 [StarRocks 아키텍처](starrocks-architecture.md#대용량-로드--복잡한-조인mpp-비교-2026-08-28-검증-완료) 참고
