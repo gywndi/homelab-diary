@@ -100,9 +100,26 @@ flowchart LR
 | Compaction 실행 주체 | CN | 지금은 CN 1개뿐이라 압축 작업도 그 CN에 집중됨 |
 | CN 등록 | `ALTER SYSTEM ADD COMPUTE NODE` (headless Service FQDN) | IP로 등록하면 파드 재시작마다 깨짐(실제로 겪음) |
 
+## shared-nothing vs shared-data CRUD 성능 비교 (2026-08-28 검증 완료)
+
+BE(로컬, 3노드에 각 1개씩 배포 + `replication_num=2`) vs CN(RGW, size=2)에 동일한 Primary Key 테이블/데이터로 CRUD 시퀀스를 돌려 비교했다. `SELECT NOW(6)`로 각 단계 전후를 감싸서 서버 사이드 시간만 측정(클라이언트 파드 기동 오버헤드 제외).
+
+| CRUD 작업 | shared-nothing (BE, 2-replica) | shared-data (CN, RGW size=2) |
+|---|---|---|
+| INSERT (30만 행) | 741.4ms | 716.6ms |
+| SELECT (point) | 10.0ms | 5.9ms |
+| SELECT (집계) | 26.6ms | 19.6ms |
+| UPDATE (upsert 3만 행) | 122.1ms | 136.2ms |
+| DELETE (3만 행) | 126.6ms | 137.3ms |
+
+**거의 동등하다 — 의외의 결과다.** 앞서 `rados bench`로 Ceph 쓰기가 1GbE에 묶여 86MB/s로 느리다는 걸 확인했는데도, 이 규모(30만 행, 실 데이터 몇 MB 수준)에서는 CN(RGW)이 BE(로컬 XFS)와 비슷하거나 오히려 조금 더 빠른 항목도 있었다.
+
+**해석**: 이 정도 데이터 규모에선 스토리지 계층(1GbE Ceph vs 로컬 XFS)이 병목이 아니라 FE의 쿼리 플래닝/실행 오버헤드가 더 지배적인 것으로 보인다. 앞서 확인한 Ceph 쓰기 병목(86MB/s)이 실제로 체감되려면 데이터 규모가 훨씬 커야(수백 MB~GB 단위) 할 것 — 소량 CRUD로는 스토리지 계층 차이가 거의 안 드러난다는 게 이번 테스트의 진짜 발견이다. 대용량 벤치마크는 다음 검증 후보로 남겨둔다.
+
 ## 검증하고 싶은 것 (다음 단계 후보)
 
+- [ ] **대용량(GB 단위) 데이터로 동일 CRUD 비교 재실행** — 소량 데이터에서는 스토리지 계층 차이가 안 보였으니, 실제로 1GbE Ceph 병목이 드러나는 규모에서 다시 비교
 - [ ] Compaction이 실제로 도는 걸 관찰 — 작은 rowset을 여러 번 로드한 뒤 `SHOW TABLET`/compaction 관련 메트릭으로 확인
-- [ ] CN을 2개로 늘려서 tablet이 실제로 분산되는지, 쿼리가 병렬화되는지 확인
+- [x] ~~CN을 2개로 늘려서~~ → BE를 3개로 늘려서 하이브리드 검증 완료(위 섹션 참고). tablet 분산/쿼리 병렬화 자체는 아직 미확인
 - [ ] Vacuum이 오래된 버전을 실제로 지우는지 — RGW 버킷 오브젝트 수 변화로 확인
-- [ ] Primary Key 테이블로 실시간 갱신 테스트 (지금은 Duplicate Key만 써봄)
+- [x] ~~Primary Key 테이블로 실시간 갱신 테스트~~ → CRUD 비교에서 완료 (UPDATE/DELETE 정상 동작 확인)

@@ -44,3 +44,4 @@ FE는 메타데이터(DB/테이블 정의, 트랜잭션 로그)를 자체 로컬
 - [`02-deploy-cn.sh`](../scripts/08-starrocks/02-deploy-cn.sh) + [`cn.conf`](../scripts/08-starrocks/cn.conf) — CN 배포 + FE 등록
 - [`03-verify.sh`](../scripts/08-starrocks/03-verify.sh) — end-to-end 검증 (DB/테이블/INSERT/SELECT)
 - [`04-deploy-be-hybrid.sh`](../scripts/08-starrocks/04-deploy-be-hybrid.sh) — 기존 FE에 BE(로컬 XFS) 추가 등록, 하이브리드 구성. `scripts/07-ceph-storage/12-resplit-osd-disk.sh`로 XFS 파티션 준비 필요
+- [`05-crud-benchmark.sh`](../scripts/08-starrocks/05-crud-benchmark.sh) — shared-nothing(BE) vs shared-data(CN) CRUD 성능 비교. 결과는 [StarRocks 아키텍처](starrocks-architecture.md#shared-nothing-vs-shared-data-crud-성능-비교-2026-08-28-검증-완료) 참고
