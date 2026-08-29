@@ -20,17 +20,7 @@ INSERT는 로컬이 앞서지만 조회/UPDATE/DELETE는 RGW가 빨랐다 — �
 
 ## 대용량 로드 + 3-way JOIN(MPP)
 
-`fact(1000만 행)` + `customer(10만)` + `product(1만)` 스타 스키마, 3-way JOIN + 필터 + GROUP BY + 정렬.
-
-```sql
-SELECT c.segment, p.category_name, COUNT(*), SUM(f.quantity * p.unit_price), AVG(f.quantity)
-FROM fact f
-JOIN customer c ON f.customer_id = c.customer_id
-JOIN product p ON f.product_id = p.product_id
-WHERE f.ts BETWEEN '2026-03-01' AND '2026-04-01'
-GROUP BY c.segment, p.category_name
-ORDER BY 4 DESC LIMIT 20;
-```
+`fact(1000만 행)` + `customer(10만)` + `product(1만)` 스타 스키마, 3-way JOIN + 필터 + GROUP BY + 정렬(쿼리 전문은 [사용쿼리 예시](starrocks-query-examples.md#3-way-joinmpp--스타-스키마-집계) 참고).
 
 | 테스트 | shared-nothing | shared-data(RGW) | 우세 |
 |---|---|---|---|

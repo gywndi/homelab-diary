@@ -81,4 +81,4 @@ OK
 
 - **`autocommit=True`가 사실상 필수다.** StarRocks는 트랜잭션 모델이 전통 RDBMS와 달라서(로드/커밋 단위가 다름), 일반적인 ORM의 암묵적 트랜잭션 관리에 의존하면 예상과 다르게 동작할 수 있다.
 - **대량 적재는 INSERT 반복이 아니라 STREAM LOAD를 쓸 것.** 위 예시처럼 몇 건 안 되는 데이터는 INSERT로 충분하지만, 수만 건 이상이면 [사용쿼리 예시](starrocks-query-examples.md)의 STREAM LOAD 패턴(HTTP PUT 벌크 로드)이 훨씬 빠르다 — 실측 비교는 [BMT](starrocks-bmt.md) 참고.
-- **읽기 전용 쿼리는 FE Follower로도 분산 가능하다.** 멀티 FE 구성이라면 커넥션 풀을 여러 FE 엔드포인트에 분산시킬 수 있다(단, 이번 세션 실측으로는 이게 항상 처리량을 늘려주진 않았다 — [BMT](starrocks-bmt.md) "4라운드" 참고).
+- **읽기 전용 쿼리는 FE Follower로도 분산 가능하다.** 멀티 FE 구성이라면 커넥션 풀을 여러 FE 엔드포인트에 분산시킬 수 있다(단, 이번 세션 실측으로는 이게 항상 처리량을 늘려주진 않았다 — [BMT](starrocks-bmt.md) "FE 3개로 분산시켜보면 나아질까" 섹션 참고).

@@ -249,13 +249,6 @@ ZSTD, 페이지네이션은 반드시 커서(keyset) 방식, 긴 텍스트 전�
 
 1. 500만 행 TSV 생성(node에서, `id, user_id, event_type, created_at_unix, payload` 순): 랜덤 시드 고정 파이썬 스크립트, 원본 크기 약 896.6MB
 2. 테이블 생성(위 DDL, `compression` 속성만 바꿔 LZ4/ZSTD 비교용으로 하나씩)
-3. STREAM LOAD로 적재:
-   ```
-   curl -s --location-trusted -u root: \
-     -H "label:archive_logs_load_$(date +%s)" \
-     -H "column_separator:\t" \
-     -H "columns: id,user_id,event_type,created_at_unix,payload,created_at=from_unixtime(created_at_unix)" \
-     -T archive_logs.tsv \
-     "http://<FE host>:8030/api/<db>/archive_logs/_stream_load"
-   ```
+3. STREAM LOAD로 적재(공통 curl 패턴은 [사용쿼리 예시](starrocks-query-examples.md#stream-load--사전-생성-파일을-http-put으로-벌크-로드) 참고) — 이 데이터셋 전용 옵션만 추가:
+   `-H "column_separator:\t"`, `-H "columns: id,user_id,event_type,created_at_unix,payload,created_at=from_unixtime(created_at_unix)"`
 4. `SHOW DATA;`로 압축 후 저장 크기 확인, 위 쿼리들을 `SELECT NOW(6)` 감싸지 않고 클라이언트 벽시계 시간으로 측정(단발 실행 — 반복 통계는 아직 안 냄, 백로그 참고)
