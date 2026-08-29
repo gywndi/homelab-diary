@@ -1,15 +1,15 @@
-# Ceph 스토리지 (RBD/RGW, shared-data 기반)
+# Ceph 스토리지 (RBD/RGW)
 
-3노드(chan08/chan09/llm001) 전체를 Rook-Ceph(v1.20.6)로 재구성 — RBD(블록)는 MySQL/KVM, RGW(오브젝트, S3 API)는 StarRocks shared-data가 쓴다. 새 장비 없이 기존 노드를 재구성하는 것만으로 진행했다.
+3노드(chan08/chan09/llm001) 전체를 Ceph(여러 서버의 디스크를 묶어서 네트워크로 복제되는 하나의 스토리지 풀로 만들어주는 분산 스토리지 시스템)로 재구성한 공용 스토리지 계층. 배포·운영은 Rook(Ceph를 k8s CRD로 선언적으로 설치·관리하게 해주는 오퍼레이터 — Ceph 데몬을 손으로 하나씩 설정하는 대신 YAML로 원하는 상태를 적어두면 대신 만들어준다, v1.20.6)이 대신한다. RBD(블록)는 MySQL/KVM이, RGW(오브젝트, S3 API)는 오브젝트 API가 필요한 다른 워크로드가 쓴다. 새 장비 없이 기존 노드를 재구성하는 것만으로 진행했다.
 
 ## 목적
 
-StarRocks의 shared-data 모드는 컴퓨트 노드가 로컬 디스크가 아니라 S3 호환 오브젝트 스토리지를 보게 만드는 구조다. 이 오브젝트 스토리지를 마련하는 김에, 같은 노드에서 이미 돌던 KVM VM 디스크와 MySQL 데이터도 같은 스토리지 계층으로 옮겨서 노드 장애와 데이터를 분리시켰다.
+그동안 각 노드 로컬 디스크에 흩어져 있던 MySQL 데이터와 KVM VM 디스크를, 네트워크로 복제되는 공용 스토리지 계층으로 옮겨서 "노드 장애 = 데이터 손실"이 되지 않게 분리하는 것이 목표였다. 동시에 S3 호환 오브젝트 API(RGW)도 함께 마련해서, 로컬 디스크가 아니라 오브젝트 스토리지를 필요로 하는 워크로드도 같은 클러스터로 받을 수 있게 했다.
 
 ## 설계 결정
 
 - **새 장비 없이 기존 3노드 재구성.** Ceph는 데이터를 3벌 복제해서 저장하는 게(3-replica) 기본값인데 마침 물리 노드가 정확히 3대라 딱 맞는다.
-- **RBD(블록)와 RGW(오브젝트)의 역할을 분리했다.** 블록 스토리지는 일반 디스크처럼 운영체제에 통째로 마운트해 파일시스템을 얹는 방식이고, 오브젝트 스토리지는 파일 하나하나를 HTTP API(S3)로 읽고 쓰는 방식이다. 실제 접근 패턴이 갈린다 — KVM VM 디스크와 MySQL 데이터는 항상 한 프로세스만 배타적으로 쓰는 블록 데이터(RBD), StarRocks는 S3 API로 접근하는 오브젝트(RGW). Ceph 안에서 서로 다른 컴포넌트가 서빙한다.
+- **RBD(블록)와 RGW(오브젝트)의 역할을 분리했다.** 블록 스토리지는 일반 디스크처럼 운영체제에 통째로 마운트해 파일시스템을 얹는 방식이고, 오브젝트 스토리지는 파일 하나하나를 HTTP API(S3)로 읽고 쓰는 방식이다. 실제 접근 패턴이 갈린다 — KVM VM 디스크와 MySQL 데이터는 항상 한 프로세스만 배타적으로 쓰는 블록 데이터(RBD), 반면 오브젝트 API로 접근하는 워크로드는 RGW. Ceph 안에서 서로 다른 컴포넌트가 서빙한다.
 - **CephFS(MDS)는 배제.** CephFS는 Ceph 위에 파일시스템을 얹어 여러 클라이언트가 동시에 같은 디렉터리를 공유하게 해주는 세 번째 방식이고, MDS(메타데이터 서버)라는 별도 데몬이 필요하다. 여러 파드가 동시에 같은 파일을 읽고 써야 하는 워크로드(k8s에서는 RWX, ReadWriteMany라 부름)가 지금은 없어서, MDS 상시 구동 비용을 32G/노드 예산에서 정당화할 근거가 없다. RWX가 필요해지면 NAS(NFS)로 커버.
 - **NAS를 OSD(디스크 하나당 데이터를 저장하는 Ceph 데몬 — 아래 "각 컴포넌트가 뭘 하는지" 참고) 백엔드로 쓰지 않는다.** 네트워크 스토리지 위에 또 네트워크 스토리지를 얹으면 지연/장애 시나리오가 한 겹 더 지저분해진다. NAS는 백업 타깃 + 향후 NFS StorageClass 용도로만 좁혔다.
 - **MySQL은 semi-sync 복제(비동기와 완전동기의 중간 — [MySQL HA](03-mysql-ha.md) 참고) 대신 "shared-disk failover cluster" 패턴.** 단일 mysqld가 k8s Deployment(Recreate) + RBD PVC(RWO, ReadWriteOnce — 한 번에 파드 하나만 마운트 가능) 위에서 돌고, 데이터 내구성은 애플리케이션 레벨 복제가 아니라 Ceph 3-replica가 담당한다. 노드가 죽으면 k8s가 다른 노드로 파드를 재스케줄하고 RBD PVC가 그대로 따라간다. RBD의 exclusive-lock(한 순간에 한 클라이언트만 쓰기 가능하게 강제하는 잠금)이 핵심 안전장치 — 두 노드가 동시에 같은 datadir을 잡으려 해도 락에 막혀 안전하게 실패한다(split-brain, 두 곳이 동시에 자신이 주인이라 믿고 쓰다 데이터가 어긋나는 사고 — 를 방지).
@@ -19,37 +19,38 @@ StarRocks의 shared-data 모드는 컴퓨트 노드가 로컬 디스크가 아�
 
 ## 아키텍처
 
+3개 층으로 나눠서 보면 이해하기 쉽다 — **① 물리 노드**(디스크를 실제로 들고 있음) → **② Ceph 저장 계층**(그 디스크들을 묶어서 블록/오브젝트로 재포장) → **③ 소비자**(그 저장소를 실제로 쓰는 워크로드).
+
 ```mermaid
-flowchart TB
-    subgraph C08["chan08"]
-        OSD08["Ceph OSD (고정 300G)"]
-        XFS08["XFS (나머지, StarRocks BE 로컬)"]
-    end
-    subgraph C09["chan09"]
-        OSD09["Ceph OSD (고정 300G)"]
-        XFS09["XFS (나머지)"]
-    end
-    subgraph C10["llm001"]
-        OSD10["Ceph OSD (고정 300G)"]
-        XFS10["XFS (나머지)"]
+flowchart LR
+    subgraph NODES["① 물리 노드 3대"]
+        direction TB
+        N08["chan08<br/>디스크 중 300G를 OSD로"]
+        N09["chan09<br/>디스크 중 300G를 OSD로"]
+        N10["llm001<br/>디스크 중 300G를 OSD로"]
     end
 
-    OSD08 <-. 3-replica .-> OSD09
-    OSD09 <-. 3-replica .-> OSD10
-    OSD10 <-. 3-replica .-> OSD08
+    NODES == "데이터를 3벌씩 복제<br/>(3-replica)" ==> POOL
 
-    RBD["RBD pool (블록, 단일 접근)"]
-    RGW["RGW (S3 API)"]
+    subgraph POOL["② Ceph 저장 계층"]
+        direction TB
+        RBD["RBD<br/>(블록 — 한 클라이언트만 배타 접근)"]
+        RGW["RGW<br/>(오브젝트 — S3 API로 다중 접근)"]
+    end
 
-    OSD08 & OSD09 & OSD10 --> RBD
-    OSD08 & OSD09 & OSD10 --> RGW
+    subgraph CONSUMERS["③ 소비자"]
+        direction TB
+        KVM["KVM VM 디스크"]
+        MYSQL["MySQL<br/>(RWO PVC, 단일 인스턴스)"]
+        EXT["오브젝트 API가<br/>필요한 다른 워크로드"]
+    end
 
-    RBD --> KVM["KVM VM 디스크<br/>(호스트에서 직접 rbd map)"]
-    RBD --> MYSQL["MySQL Deployment<br/>(RWO PVC, 단일 인스턴스)"]
-    RGW --> SR["StarRocks CN<br/>(shared-data)"]
+    RBD --> KVM
+    RBD --> MYSQL
+    RGW --> EXT
 ```
 
-디스크를 Ceph(고정 300G)와 XFS(나머지)로 나눈 이유는 StarRocks shared-nothing(BE) 테스트용 로컬 스토리지를 같은 디스크에서 확보하기 위함 — 아래 "디스크 재분할" 참고.
+각 노드는 디스크 전체를 Ceph에 주지 않고 300G만 OSD로 떼어주고, 나머지는 별도 파일시스템(XFS)으로 남겨 다른 용도로 쓴다 — 이 문서는 Ceph만 다루므로 그 용도는 다루지 않는다(디스크를 어떻게 나눴는지 절차는 아래 "디스크 재분할" 참고).
 
 | 컴포넌트 | 역할 |
 |---|---|
@@ -82,7 +83,7 @@ ufw allow from "$POD_CIDR" to any port 6800:7300 proto tcp comment 'Ceph osd/mgr
 ufw allow from "$SUBNET" to any port 8443 proto tcp comment 'Ceph mgr dashboard'
 ufw allow from "$POD_CIDR" to any port 8443 proto tcp comment 'Ceph mgr dashboard same-node hairpin'
 
-# RGW(S3, StarRocks용)
+# RGW(S3, 오브젝트 API용)
 ufw allow from "$SUBNET" to any port 7480 proto tcp comment 'Ceph RGW S3'
 ufw allow from "$POD_CIDR" to any port 7480 proto tcp comment 'Ceph RGW S3 same-node hairpin'
 
@@ -174,7 +175,7 @@ allowVolumeExpansion: true
 ```
 
 ### 오브젝트 스토리지(RGW) 생성
-- 설명: RGW를 만들고 MetalLB로 S3 엔드포인트 VIP를 노출한다. `gateway.instances`는 1로 시작했다가 StarRocks 동시성 벤치마크 중 3(노드당 1개)으로 늘렸다 — 다만 이게 동시성 병목의 주 원인은 아니었다([BMT](07-2-ceph-storage-bmt.md) 참고).
+- 설명: RGW를 만들고 MetalLB로 S3 엔드포인트 VIP를 노출한다. `gateway.instances`는 노드당 1개씩 3개로 뒀다(RGW 파드가 여러 개면 요청을 분산 처리할 수 있음).
 - 스크립트: [`04-apply-objectstore.sh`](../scripts/07-ceph-storage/04-apply-objectstore.sh) + [`04-objectstore.yaml`](../scripts/07-ceph-storage/04-objectstore.yaml)
 ```yaml
 apiVersion: ceph.rook.io/v1
@@ -340,7 +341,7 @@ kubectl -n mysql patch svc mysql -p '{"spec":{"type":"LoadBalancer","externalTra
 ```
 
 ### 디스크 재분할 — Ceph 고정 300G + XFS
-- 설명: StarRocks shared-nothing(BE) 테스트용 로컬 스토리지를 확보하려고 OSD 전용 디스크를 "Ceph 고정 300G + 나머지 XFS"로 재분할한다. 대상 OSD를 `ceph osd out` → `purge`로 먼저 뺀 뒤 실행. llm001은 OS와 디스크(GPT)를 공유해서 이 스크립트 대신 대상 파티션만 `parted rm`으로 지우고 같은 시작 오프셋에서 수동으로 재생성했다.
+- 설명: 디스크 전체를 OSD에 주지 않고, 다른 용도로 쓸 로컬 스토리지를 같은 디스크에서 떼어 남겨두려고 OSD 전용 디스크를 "Ceph 고정 300G + 나머지 XFS"로 재분할한다. 대상 OSD를 `ceph osd out` → `purge`로 먼저 뺀 뒤 실행. llm001은 OS와 디스크(GPT)를 공유해서 이 스크립트 대신 대상 파티션만 `parted rm`으로 지우고 같은 시작 오프셋에서 수동으로 재생성했다.
 - 스크립트: [`12-resplit-osd-disk.sh`](../scripts/07-ceph-storage/12-resplit-osd-disk.sh) (전용 데이터 디스크 노드용, 예: `./12-resplit-osd-disk.sh /dev/sda 300GB /mnt/starrocks-be`)
 ```bash
 DEVICE="/dev/sda"; CEPH_SIZE="300GB"; MOUNT_PATH="/mnt/starrocks-be"

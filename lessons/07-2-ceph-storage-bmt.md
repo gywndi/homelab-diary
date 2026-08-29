@@ -1,6 +1,6 @@
 # Ceph 스토리지 벤치마크
 
-설계는 [Ceph 스토리지](07-1-ceph-storage.md) 참고. 실사용 가능한 성능인지 스토리지/DB/OLAP 세 계층을 각각 측정했다.
+설계는 [Ceph 스토리지](07-1-ceph-storage.md) 참고. 실사용 가능한 성능인지 스토리지(RBD 자체)와 그 위에 얹은 DB(MySQL) 계층을 측정했다.
 
 ## 핵심 결론
 
@@ -11,12 +11,10 @@
 | 병목 원인 | 디스크가 아니라 **1GbE 네트워크**(3노드 전부 NIC 상한 1000Mb/s) |
 | MySQL(`sysbench oltp_read_write` — 일반적인 온라인 트랜잭션 처리 패턴을 흉내낸 부하 테스트, 8 threads, 40만 행) 튜닝 전 | 125 TPS(초당 처리한 트랜잭션 수), 평균 지연 64ms |
 | MySQL `innodb_flush_log_at_trx_commit=2` 튜닝 후 | **190.98 TPS(+52%)**, 평균 지연 41.87ms(-34%) |
-| StarRocks 100만 행 로드 | ~3초 |
-| StarRocks 집계 쿼리(COUNT/GROUP BY/범위 필터, 100만 행) | 전부 30ms 미만(CN 로컬 Data Cache 덕분) |
 
 **설계 규칙**: 1GbE 위에서 매 트랜잭션 커밋마다 fsync를 강제하면 RBD 3-replica 전체 ack 대기가 매번 발생한다 — `innodb_flush_log_at_trx_commit=2`로 fsync를 1초 단위로 묶어야 한다(크래시 안전성 트레이드오프는 mysqld 크래시엔 안전, OS 크래시 시 최근 1초분 유실 가능). 개선하려면 디스크 교체는 의미 없고 NIC을 10GbE로 올리는 것만이 실질적 해법 — 지금 규모에선 문제없지만 트래픽이 커지면 이 지점이 먼저 막힌다.
 
-StarRocks/shared-nothing vs shared-data 상세 벤치마크(CN 확장, FE 배치, 압축률, 페이지네이션)는 [StarRocks BMT](08-2-starrocks-analytics-bmt.md) 참고 — 이 문서는 Ceph 자체(RBD/RGW) 레이어만 다룬다.
+이 문서는 Ceph 자체(RBD)와 그 위 MySQL 성능만 다룬다. RGW(오브젝트) 위에서 도는 다른 워크로드의 성능 검증은 해당 워크로드의 벤치마크 문서에서 따로 다룬다.
 
 ## 병목 분석: 디스크가 아니라 1GbE 네트워크였다
 
@@ -27,8 +25,6 @@ StarRocks/shared-nothing vs shared-data 상세 벤치마크(CN 확장, FE 배치
 - **네트워크 대역폭 상한: 3노드 전부 물리 NIC이 1GbE** — 이게 실제 병목
 
 size=3 replication 쓰기는 클라이언트→primary OSD로 들어온 뒤 primary가 나머지 2개 replica로 다시 내보내야 완료 처리된다. primary 노드의 NIC 하나가 "받는 트래픽 + 내보내는 트래픽 ×2"를 전부 같은 1Gbps 파이프로 처리해야 해서, 원본 링크 속도(iperf3 실측 117MB/s)보다 실제 쓰기 처리량(86MB/s)이 낮고 지연도 커진다.
-
-StarRocks 집계 쿼리가 Ceph 자체는 느린데도 30ms 미만인 건 CN의 로컬 Data Cache 덕분 — "콜드 데이터는 네트워크/Ceph 속도에 매여있고, 캐시된 데이터는 빠르다"는 shared-data 구조의 트레이드오프가 실측으로 확인됐다.
 
 ## MySQL 컷오버 후 발견한 문제 3건
 
@@ -48,7 +44,7 @@ StarRocks 집계 쿼리가 Ceph 자체는 느린데도 30ms 미만인 건 CN의 
 
 ## 남아있는 리스크
 
-- Ceph usable 용량(재분할 후 약 700GiB대)을 RBD와 RGW가 통째로 나눠 쓴다 — MySQL(17G)+KVM+StarRocks 테스트 데이터가 전부 여기 들어간다.
+- Ceph usable 용량(재분할 후 약 700GiB대)을 RBD와 RGW가 통째로 나눠 쓴다 — MySQL(17G)+KVM 데이터와 RGW에 올라간 다른 워크로드 데이터가 전부 여기 들어간다.
 - RGW dataPool은 size(복제본 수)=2/min_size(이 값 미만으로 살아있는 복제본이 줄면 쓰기 자체를 막는 안전장치)=1로 의도적으로 낮췄다(연구용 데이터라 손실 감수) — 다른 노드 장애와 겹치면 실제로 데이터가 날아갈 수 있다.
 - HEALTH_WARN(insecure key type 경고)은 무해하지만 커널 6.8에서는 해소 불가(7.0+ 필요) — 낮은 우선순위로 방치.
 
