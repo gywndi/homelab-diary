@@ -2,6 +2,8 @@
 
 Stage 1(chan08/chan09 keepalived 페일오버)을 대체했다. 이제 단일 mysqld가 k8s Deployment + Ceph RBD PVC 위에서 돈다. 스토리지 배경은 [Ceph 스토리지](07-1-ceph-storage.md) 참고.
 
+> VIP는 이 문서에 적힌 `10.5.5.4`에서 2026-08-29에 `10.5.5.51`로 다시 옮겨졌다(애플리케이션 VIP 대역 정책 적용, [내부 DNS](09-internal-dns.md) 참고). 지금 실제 접속 주소는 `mysql.k8s.home`(도메인) 또는 `10.5.5.51`이다.
+
 ## 목적
 
 Stage 1은 MySQL 자체 복제(semi-sync)로 데이터를 이중화했다. 이제는 Ceph가 데이터를 3벌 복제해준다. MySQL이 직접 복제를 관리할 필요가 없어졌다. 인스턴스도 하나로 줄었다. 노드가 죽으면 k8s가 다른 노드로 재스케줄하면 끝이다.

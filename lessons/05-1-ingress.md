@@ -19,7 +19,7 @@ k8s 클러스터 밖(다른 물리 서버들)에서 돌던 서비스들을 도�
 ```mermaid
 flowchart TB
     INET["인터넷"] --> ROUTER["집 공유기<br/>80/443 포트포워딩"]
-    ROUTER --> VIP["VIP 10.5.5.2<br/>(MetalLB, 이 순간은 chan08이 응답)"]
+    ROUTER --> VIP["VIP 10.5.5.50<br/>(MetalLB, 이 순간은 chan08이 응답)"]
 
     subgraph K8S["k8s 클러스터"]
         VIP -.ARP는 한 노드만.-> C08
@@ -85,7 +85,7 @@ metadata:
   namespace: metallb-system
 spec:
   addresses:
-  - 10.5.5.2/32
+  - 10.5.5.50/32
 
 # L2Advertisement: 등록한 대역을 L2(ARP) 모드로 광고
 apiVersion: metallb.io/v1beta1
@@ -110,8 +110,9 @@ kubectl -n ingress-nginx patch svc ingress-nginx-controller \
 
 # MetalLB에 VIP 고정 요청
 kubectl -n ingress-nginx annotate svc ingress-nginx-controller \
-  metallb.io/loadBalancerIPs=10.5.5.2 --overwrite
+  metallb.io/loadBalancerIPs=10.5.5.50 --overwrite
 ```
+VIP는 원래 `10.5.5.2`였다가 2026-08-29에 `.50`으로 옮겼다 — 애플리케이션 VIP는 `.50~.99` 대역, `.20` 이하는 인프라 전용(예: [내부 DNS](09-internal-dns.md))이라는 정책을 정했기 때문이다. VIP를 옮길 때는 IPAddressPool 주소뿐 아니라 이 annotation도 같이 갱신해야 한다 — annotation이 옛 IP로 고정돼 있으면 풀을 바꿔도 MetalLB가 새 IP를 할당하지 못한다(`AllocationFailed`).
 
 ### 컨트롤플레인 파드-호스트 방화벽 수정
 - 설명: 컨트롤플레인 노드(chan08)에 파드가 처음 뜨면서 드러난 방화벽 문제를 고친다. 아래 "알려진 이슈" 참고.
