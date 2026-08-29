@@ -210,16 +210,9 @@ ORDER BY id LIMIT 50;
 
 **StarRocks는 MySQL 콜드 데이터의 장기보관처로 실사용 가능하다.** 압축은 ZSTD, 페이지네이션은 반드시 커서(keyset) 방식, 긴 텍스트 전체 스캔 검색은 선택적 필터를 곁들이거나 역색인을 검토하는 세 가지 규칙만 지키면 된다.
 
-## 검증하고 싶은 것 (백로그)
-
-- [ ] 압축 방식별(LZ4/ZSTD) **읽기(스캔/집계) 성능** 비교 — 이번엔 압축률/쓰기 시간만 측정
-- [ ] 수억~수십억 행 규모로 키워서 커서 vs OFFSET, `LIKE` 격차가 얼마나 더 벌어지는지 재확인(지금은 500만 행 기준)
-- [ ] 같은 데이터를 실제 MySQL(InnoDB)에 적재해 `COUNT(*)`/필터 COUNT/OFFSET 페이지네이션을 나란히 비교 — 지금은 "MySQL은 느릴 것"이라는 일반 지식에 기댐
-- [ ] StarRocks 역색인(inverted index)을 `payload` 같은 긴 텍스트 컬럼에 걸어 순수 `LIKE`(160~570ms) 대비 개선폭 실측
-
 ## 재현 방법
 
 1. 500만 행 TSV 생성(node에서, `id, user_id, event_type, created_at_unix, payload` 순): 랜덤 시드 고정 파이썬 스크립트, 원본 크기 약 896.6MB.
 2. 테이블 생성(위 DDL, `compression` 속성만 바꿔 LZ4/ZSTD 비교용으로 하나씩).
 3. STREAM LOAD로 적재(공통 curl 패턴은 [StarRocks 분석 엔진](08-1-starrocks-analytics.md)의 STREAM LOAD 예시 참고) — 이 데이터셋 전용 옵션만 추가: `-H "column_separator:\t"`, `-H "columns: id,user_id,event_type,created_at_unix,payload,created_at=from_unixtime(created_at_unix)"`.
-4. `SHOW DATA;`로 압축 후 저장 크기 확인. 위 쿼리들은 `SELECT NOW(6)` 감싸지 않고 클라이언트 벽시계 시간으로 측정했다(단발 실행 — 반복 통계는 아직 안 냄, 백로그 참고).
+4. `SHOW DATA;`로 압축 후 저장 크기 확인. 위 쿼리들은 `SELECT NOW(6)` 감싸지 않고 클라이언트 벽시계 시간으로 측정했다(단발 실행, 반복 통계는 아직 안 냄).

@@ -1,6 +1,6 @@
 # StarRocks 분석 엔진 벤치마크 (shared-nothing vs shared-data)
 
-설계는 [StarRocks 분석 엔진](08-1-starrocks-analytics.md) 참고. `starrocks-sn`(FE+BE, 로컬 XFS)과 `starrocks`(FE+CN, Ceph RGW) 두 클러스터를 같은 스키마/쿼리로 비교했다.
+설계는 [StarRocks 분석 엔진](08-1-starrocks-analytics.md) 참고. `starrocks-sn`(FE+BE, 로컬 XFS)과 `starrocks`(FE+CN, Ceph RGW) 두 클러스터를 같은 스키마/쿼리로 비교했다. RGW(RADOS Gateway)는 Ceph가 제공하는 S3 호환 오브젝트 스토리지 API다 — 자세한 내용은 [Ceph 스토리지](07-1-ceph-storage.md) 참고. 아래에서 "RGW"는 곧 shared-data 클러스터가 데이터를 저장하는 네트워크 스토리지를 가리킨다.
 
 ## 핵심 결론
 
@@ -116,15 +116,6 @@ FE 배치까지 끝낸 상태에서 CN을 1개→2개→3개로 늘려가며 두
 ### 알려진 함정: 스캔량을 비례시키지 않으면 착시가 생긴다
 
 처음엔 테이블을 1000만→5000만 행으로 5배 늘려 같은 날짜 필터로 재측정했다. "CN 1→2배 개선, 2→3 수렴"으로 보였지만, 필터가 절대 달력 날짜(`BETWEEN '2026-03-01' AND '2026-04-01'`)라서 테이블을 5배로 늘려도 **필터를 통과하는 절대 행수가 항상 268만 행으로 고정**돼 있었다. `EXPLAIN ANALYZE`의 `OutputRows`로 확인했다. 테이블 크기와 무관하게 스캔량이 똑같으면 "더 무거운 쿼리"가 아니다. 스캔량을 테이블 크기에 비례하게(`WHERE id <= N*0.3`처럼) 고정한 뒤에야 위 표의 신뢰할 수 있는 CN 확장 결과를 얻었다.
-
-## 검증하고 싶은 것 (백로그)
-
-- [ ] point/UPDATE/DELETE도 집계처럼 반복 측정으로 워밍업 vs 구조적 차이 분리(집계만 확인함)
-- [ ] `starrocks-sn` `replication_num=1`(진짜 로컬 전용)로 STREAM LOAD 재비교 — 지금은 2라 두 번째 복제본의 네트워크 비용이 섞여 있음
-- [ ] 60커넥션 이상 더 큰 동시성에서도 FE 배치 개선 효과가 유지되는지 확인(지금은 20커넥션만 테스트)
-- [ ] CN=3의 꼬리 지연이 정확히 어디서 오는지(네트워크 RPC 스케줄링 변동 vs GC) 개별 실행 프로파일로 분석
-- [ ] dimension 테이블도 커서 shuffle join이 되는 경우 CN 확장 효과가 다르게 나오는지 확인
-- [ ] Compaction/Vacuum이 실제로 도는 걸 관찰(작은 rowset 반복 로드 후 메트릭 확인)
 
 ## 스크립트 목록
 
