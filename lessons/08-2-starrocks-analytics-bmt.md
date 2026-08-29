@@ -35,7 +35,7 @@ Primary Key 테이블(30만 행)에 INSERT/SELECT(point)/SELECT(집계)/UPDATE(u
 | 1000만 행 로드 | 3.65초 | 3.92초 | SN 7% |
 | 3-way JOIN + 집계 + 정렬 | 113.9ms | 102.4ms | SD 10% |
 
-데이터 생성의 CPU 비용을 배제하려고, 미리 만들어둔 CSV(고카디널리티, 1000만 행, 2.8GB)를 STREAM LOAD로 순수 쓰기 시간만 쟀다.
+데이터 생성의 CPU 비용을 배제하려고, 미리 만들어둔 CSV(고카디널리티, 1000만 행, 2.8GB)를 STREAM LOAD(StarRocks의 HTTP 벌크 적재 API)로 순수 쓰기 시간만 쟀다.
 
 | 방식 | LoadTimeMs |
 |---|---|
@@ -107,7 +107,7 @@ FE 배치까지 끝낸 상태에서 CN을 1개→2개→3개로 늘려가며 두
 | CN=2 | **82.4ms** | 72.4ms | 23.8ms |
 | CN=3 | 99.3ms | 72.9ms | 38.2ms |
 
-**CN=1→2는 확실한 이득이다(평균 24% 단축, 40회 표본으로 통계적으로 유의).** CN=2→3은 애매하다 — 중앙값은 거의 같은데(72.4ms vs 72.9ms) CN=3의 표준편차가 훨씬 크다(23.8ms→38.2ms). "전형적인" 실행 속도는 CN=2와 CN=3이 사실상 같지만, CN=3은 가끔 훨씬 느린 실행(꼬리 지연)이 섞여 평균과 p95를 끌어올린다. "느려짐"이 아니라 "가끔 꼬리 지연이 섞임"이 정확한 설명이다.
+**CN=1→2는 확실한 이득이다(평균 24% 단축, 40회 표본으로 통계적으로 유의).** CN=2→3은 애매하다 — 중앙값은 거의 같은데(72.4ms vs 72.9ms) CN=3의 표준편차가 훨씬 크다(23.8ms→38.2ms). "전형적인" 실행 속도는 CN=2와 CN=3이 사실상 같다. 다만 CN=3은 가끔 훨씬 느린 실행(꼬리 지연)이 섞여 평균과 p95를 끌어올린다. "느려짐"이 아니라 "가끔 꼬리 지연이 섞임"이 정확한 설명이다.
 
 이 쿼리 구조(dimension 테이블이 작아 broadcast join으로 처리됨)는 병렬도 2에서 수렴한다. CN=1→2는 fact 스캔이 정확히 절반으로 쪼개지는 뚜렷한 이득이 있다. CN=3에서는 dimension broadcast 비용과 결과 병합이 고정 비용으로 작용해 추가 분할의 이득을 상쇄한다.
 
@@ -115,16 +115,46 @@ FE 배치까지 끝낸 상태에서 CN을 1개→2개→3개로 늘려가며 두
 
 ### 알려진 함정: 스캔량을 비례시키지 않으면 착시가 생긴다
 
-처음엔 테이블을 1000만→5000만 행으로 5배 늘려 같은 날짜 필터로 재측정했다. "CN 1→2배 개선, 2→3 수렴"으로 보였지만, 필터가 절대 달력 날짜(`BETWEEN '2026-03-01' AND '2026-04-01'`)라서 테이블을 5배로 늘려도 **필터를 통과하는 절대 행수가 항상 268만 행으로 고정**돼 있었다. `EXPLAIN ANALYZE`의 `OutputRows`로 확인했다. 테이블 크기와 무관하게 스캔량이 똑같으면 "더 무거운 쿼리"가 아니다. 스캔량을 테이블 크기에 비례하게(`WHERE id <= N*0.3`처럼) 고정한 뒤에야 위 표의 신뢰할 수 있는 CN 확장 결과를 얻었다.
+처음엔 테이블을 1000만→5000만 행으로 5배 늘려 같은 날짜 필터로 재측정했다. "CN 1→2배 개선, 2→3 수렴"으로 보였다. 하지만 필터가 절대 달력 날짜(`BETWEEN '2026-03-01' AND '2026-04-01'`)였다. 그래서 테이블을 5배로 늘려도 **필터를 통과하는 절대 행수가 항상 268만 행으로 고정**돼 있었다. `EXPLAIN ANALYZE`의 `OutputRows`로 확인했다. 테이블 크기와 무관하게 스캔량이 똑같으면 "더 무거운 쿼리"가 아니다. 스캔량을 테이블 크기에 비례하게(`WHERE id <= N*0.3`처럼) 고정한 뒤에야 위 표의 신뢰할 수 있는 CN 확장 결과를 얻었다.
 
-## 스크립트 목록
+## 스크립트 목록 (이름 순)
 
-- [`11-real-sn-vs-shared-data-benchmark.sh`](../scripts/08-starrocks/11-real-sn-vs-shared-data-benchmark.sh) — STREAM LOAD 비교
-- [`12-real-sn-vs-shared-data-crud.sh`](../scripts/08-starrocks/12-real-sn-vs-shared-data-crud.sh) — CRUD 비교
-- [`13-real-sn-vs-shared-data-mpp.sh`](../scripts/08-starrocks/13-real-sn-vs-shared-data-mpp.sh) — 대용량+MPP 비교
-- [`14-real-sn-vs-shared-data-agg-tps.sh`](../scripts/08-starrocks/14-real-sn-vs-shared-data-agg-tps.sh) — 직렬 TPS
-- [`15-real-sn-vs-shared-data-agg-concurrent-tps.sh`](../scripts/08-starrocks/15-real-sn-vs-shared-data-agg-concurrent-tps.sh) — 동시 처리 TPS
-- [`16-add-fe-followers.sh`](../scripts/08-starrocks/16-add-fe-followers.sh) — FE Follower 추가(코디네이터 분산 실험, 결과적으로 원복)
-- RGW 게이트웨이 3개 확장: [`04-objectstore.yaml`](../scripts/07-ceph-storage/04-objectstore.yaml)의 `gateway.instances`(1→3)
-- CN 개수 확장: `ALTER SYSTEM ADD/DROP COMPUTE NODE`로 등록/해제
-- FE를 llm001로 이동: `kubectl -n starrocks patch deployment fe --type=json -p='[{"op":"add","path":"/spec/template/spec/nodeSelector","value":{"kubernetes.io/hostname":"llm001"}}]'`
+### STREAM LOAD 비교
+- 설명: shared-nothing과 shared-data 클러스터에 같은 CSV를 STREAM LOAD로 적재해 순수 쓰기 시간을 비교한다.
+- 스크립트: [`11-real-sn-vs-shared-data-benchmark.sh`](../scripts/08-starrocks/11-real-sn-vs-shared-data-benchmark.sh)
+
+### CRUD 비교
+- 설명: INSERT/SELECT(point)/SELECT(집계)/UPDATE/DELETE 시퀀스를 양쪽 클러스터에서 비교한다.
+- 스크립트: [`12-real-sn-vs-shared-data-crud.sh`](../scripts/08-starrocks/12-real-sn-vs-shared-data-crud.sh)
+
+### 대용량 + MPP 비교
+- 설명: fact/customer/product 스타 스키마 로드와 3-way JOIN을 양쪽 클러스터에서 비교한다.
+- 스크립트: [`13-real-sn-vs-shared-data-mpp.sh`](../scripts/08-starrocks/13-real-sn-vs-shared-data-mpp.sh)
+
+### 직렬 TPS
+- 설명: 단일 커넥션으로 같은 집계 쿼리를 200회 연속 실행해 워밍업 이후 정상 상태 지연을 측정한다.
+- 스크립트: [`14-real-sn-vs-shared-data-agg-tps.sh`](../scripts/08-starrocks/14-real-sn-vs-shared-data-agg-tps.sh)
+
+### 동시 처리 TPS
+- 설명: mysql 클라이언트 20개를 동시에 띄워 동시성 부하에서의 QPS를 측정한다.
+- 스크립트: [`15-real-sn-vs-shared-data-agg-concurrent-tps.sh`](../scripts/08-starrocks/15-real-sn-vs-shared-data-agg-concurrent-tps.sh)
+
+### FE Follower 추가
+- 설명: FE Follower를 늘려 코디네이터 분산 효과를 확인한다(결과적으로 효과 없어 원복).
+- 스크립트: [`16-add-fe-followers.sh`](../scripts/08-starrocks/16-add-fe-followers.sh)
+
+### 수동 조작(스크립트 없음)
+FE 배치·CN 개수·RGW 게이트웨이 개수 실험은 별도 스크립트 없이 아래 명령을 그때그때 직접 실행했다.
+
+```bash
+# RGW 게이트웨이 1개 → 3개로 확장(04-objectstore.yaml의 gateway.instances 값 변경 후 적용)
+kubectl apply -f 04-objectstore.yaml
+
+# CN 등록/해제(개수 확장 실험)
+ALTER SYSTEM ADD COMPUTE NODE "...";
+ALTER SYSTEM DROP COMPUTE NODE "...";
+
+# FE를 가장 여유 있는 노드(llm001)로 이동
+kubectl -n starrocks patch deployment fe --type=json \
+  -p='[{"op":"add","path":"/spec/template/spec/nodeSelector","value":{"kubernetes.io/hostname":"llm001"}}]'
+```

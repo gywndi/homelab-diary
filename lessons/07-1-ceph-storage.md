@@ -6,6 +6,14 @@
 
 그동안 MySQL 데이터와 KVM VM 디스크는 각 노드 로컬 디스크에 흩어져 있었다. 이걸 네트워크로 복제되는 공용 스토리지 계층으로 옮겼다. 목표는 "노드 장애 = 데이터 손실"이 되지 않게 분리하는 것이었다. 동시에 S3 호환 오브젝트 API(RGW)도 마련했다. 로컬 디스크가 아니라 오브젝트 스토리지가 필요한 워크로드도 같은 클러스터로 받을 수 있게 됐다.
 
+## 대상 노드
+
+| 노드 | IP | OSD 디바이스 |
+|---|---|---|
+| chan08 | 10.5.5.8 | `/dev/sda1` |
+| chan09 | 10.5.5.9 | `/dev/sda1` |
+| llm001 | 10.5.5.10 | `/dev/nvme0n1p3` |
+
 ## 설계 결정
 
 - **새 장비 없이 기존 3노드 재구성.** Ceph는 기본값으로 데이터를 3벌 복제한다(3-replica). 마침 물리 노드가 정확히 3대라 딱 맞는다.
@@ -66,43 +74,56 @@ flowchart LR
 - 설명: hostNetwork로 뜨는 mon/mgr/osd/RGW 포트를 3노드 모두에 연다. same-node hairpin 규칙도 같이 연다 — 같은 노드의 pod network 파드가 이 노드의 hostNetwork Ceph 데몬에 접근할 때는 소스 IP가 pod CIDR로 보인다. 누락하면 `rados`/`radosgw-admin`이 에러 없이 그냥 멈춘다.
 - 스크립트: [`00-open-ceph-firewall-ports.sh`](../scripts/07-ceph-storage/00-open-ceph-firewall-ports.sh)
 ```bash
-SUBNET="10.5.5.0/24"
-POD_CIDR="10.244.0.0/16"
+# mon msgr v1 — 물리망(10.5.5.0/24)
+sudo ufw allow from 10.5.5.0/24 to any port 6789 proto tcp comment 'Ceph mon msgr v1'
 
-# mon (msgr v1/v2) — 물리망 + same-node hairpin(pod CIDR) 둘 다
-ufw allow from "$SUBNET" to any port 6789 proto tcp comment 'Ceph mon msgr v1'
-ufw allow from "$SUBNET" to any port 3300 proto tcp comment 'Ceph mon msgr v2'
-ufw allow from "$POD_CIDR" to any port 6789 proto tcp comment 'Ceph mon msgr v1 same-node hairpin'
-ufw allow from "$POD_CIDR" to any port 3300 proto tcp comment 'Ceph mon msgr v2 same-node hairpin'
+# mon msgr v2 — 물리망
+sudo ufw allow from 10.5.5.0/24 to any port 3300 proto tcp comment 'Ceph mon msgr v2'
 
-# osd/mgr/mds 포트 범위
-ufw allow from "$SUBNET" to any port 6800:7300 proto tcp comment 'Ceph osd/mgr/mds'
-ufw allow from "$POD_CIDR" to any port 6800:7300 proto tcp comment 'Ceph osd/mgr/mds same-node hairpin'
+# mon msgr v1 — same-node hairpin(pod CIDR 10.244.0.0/16)
+sudo ufw allow from 10.244.0.0/16 to any port 6789 proto tcp comment 'Ceph mon msgr v1 same-node hairpin'
 
-# mgr 대시보드(ssl)
-ufw allow from "$SUBNET" to any port 8443 proto tcp comment 'Ceph mgr dashboard'
-ufw allow from "$POD_CIDR" to any port 8443 proto tcp comment 'Ceph mgr dashboard same-node hairpin'
+# mon msgr v2 — same-node hairpin
+sudo ufw allow from 10.244.0.0/16 to any port 3300 proto tcp comment 'Ceph mon msgr v2 same-node hairpin'
 
-# RGW(S3, 오브젝트 API용)
-ufw allow from "$SUBNET" to any port 7480 proto tcp comment 'Ceph RGW S3'
-ufw allow from "$POD_CIDR" to any port 7480 proto tcp comment 'Ceph RGW S3 same-node hairpin'
+# osd/mgr/mds 포트 범위 — 물리망
+sudo ufw allow from 10.5.5.0/24 to any port 6800:7300 proto tcp comment 'Ceph osd/mgr/mds'
 
-ufw reload
+# osd/mgr/mds 포트 범위 — same-node hairpin
+sudo ufw allow from 10.244.0.0/16 to any port 6800:7300 proto tcp comment 'Ceph osd/mgr/mds same-node hairpin'
+
+# mgr 대시보드(ssl) — 물리망
+sudo ufw allow from 10.5.5.0/24 to any port 8443 proto tcp comment 'Ceph mgr dashboard'
+
+# mgr 대시보드(ssl) — same-node hairpin
+sudo ufw allow from 10.244.0.0/16 to any port 8443 proto tcp comment 'Ceph mgr dashboard same-node hairpin'
+
+# RGW(S3, 오브젝트 API용) — 물리망
+sudo ufw allow from 10.5.5.0/24 to any port 7480 proto tcp comment 'Ceph RGW S3'
+
+# RGW(S3, 오브젝트 API용) — same-node hairpin
+sudo ufw allow from 10.244.0.0/16 to any port 7480 proto tcp comment 'Ceph RGW S3 same-node hairpin'
+
+# 지금까지 만든 규칙을 실제로 적용
+sudo ufw reload
 ```
+3노드(chan08/chan09/llm001) 모두에서 동일하게 실행한다.
 
 ### Rook operator 설치
 - 설명: CRD + 공통 리소스 + operator를 설치한다. CRD(Custom Resource Definition)는 k8s API에 `CephCluster` 같은 Ceph 전용 리소스 타입을 새로 등록하는 것이다. operator는 그 CRD가 실제로 만들어지면 Ceph 데몬들을 대신 배포·관리해주는 컨트롤러다. Rook 1.20부터 CSI(Container Storage Interface — k8s가 여러 스토리지 시스템을 표준 방식으로 붙이게 해주는 규격) 드라이버 관리가 별도 오퍼레이터로 분리됐다. `csi-operator.yaml`을 먼저 적용해야 한다 — 빠뜨리면 `operator.yaml` 적용 시 "no matches for kind" 에러가 난다.
 - 스크립트: [`01-install-rook-operator.sh`](../scripts/07-ceph-storage/01-install-rook-operator.sh)
 ```bash
-ROOK_VERSION="v1.20.6"
-BASE="https://raw.githubusercontent.com/rook/rook/${ROOK_VERSION}/deploy/examples"
+# CRD(CephCluster 등 Ceph 전용 리소스 타입) 등록
+kubectl apply -f https://raw.githubusercontent.com/rook/rook/v1.20.6/deploy/examples/crds.yaml
 
-kubectl apply -f "${BASE}/crds.yaml"
-kubectl apply -f "${BASE}/common.yaml"
+# 공통 리소스(ServiceAccount, RBAC 등) 설치
+kubectl apply -f https://raw.githubusercontent.com/rook/rook/v1.20.6/deploy/examples/common.yaml
 
 # v1.20부터 CSI 드라이버가 별도 ceph-csi-operator로 분리됨 — 이 CRD가 없으면 operator.yaml 적용 시 에러
-kubectl apply -f "${BASE}/csi-operator.yaml"
-kubectl apply -f "${BASE}/operator.yaml"
+kubectl apply -f https://raw.githubusercontent.com/rook/rook/v1.20.6/deploy/examples/csi-operator.yaml
+
+# operator 본체 설치
+kubectl apply -f https://raw.githubusercontent.com/rook/rook/v1.20.6/deploy/examples/operator.yaml
 ```
 
 ### CephCluster 생성
@@ -136,6 +157,7 @@ spec:
         devices: [{name: "nvme0n1p3"}]
 ```
 ```bash
+# 위 CephCluster 매니페스트 적용
 kubectl apply -f 02-cluster.yaml
 
 # mon/osd 파드가 생기는 것부터 폴링 후 Ready 대기(생성 전에 wait를 걸면 즉시 에러)
@@ -196,6 +218,7 @@ spec:
     instances: 3
 ```
 ```bash
+# 위 CephObjectStore 매니페스트 적용
 kubectl apply -f 04-objectstore.yaml
 
 # RGW 파드 Ready 대기 후 VIP 등록(IPAddressPool/L2Advertisement, ingress와 같은 패턴)
@@ -216,30 +239,37 @@ spec:
 
 ### 디스크 재분할 — Ceph 고정 300G + XFS
 - 설명: 디스크 전체를 OSD에 주지 않는다. 다른 용도로 쓸 로컬 스토리지를 같은 디스크에서 떼어 남겨두려고, OSD 전용 디스크를 "Ceph 고정 300G + 나머지 XFS"로 재분할한다. 대상 OSD를 `ceph osd out` → `purge`로 먼저 뺀 뒤 실행한다. llm001은 OS와 디스크(GPT)를 공유해서 이 스크립트 대신 대상 파티션만 `parted rm`으로 지우고 같은 시작 오프셋에서 수동으로 재생성했다.
-- 스크립트: [`12-resplit-osd-disk.sh`](../scripts/07-ceph-storage/12-resplit-osd-disk.sh) (전용 데이터 디스크 노드용, 예: `./12-resplit-osd-disk.sh /dev/sda 300GB /mnt/starrocks-be`)
+- 스크립트: [`12-resplit-osd-disk.sh`](../scripts/07-ceph-storage/12-resplit-osd-disk.sh) — 디바이스/Ceph 파티션 크기/마운트 경로를 인자로 받는다(전용 데이터 디스크 노드용). chan08/chan09 둘 다 아래 값 그대로 실행했다: `sudo ./12-resplit-osd-disk.sh /dev/sda 300GB /mnt/starrocks-be`
 ```bash
-DEVICE="/dev/sda"; CEPH_SIZE="300GB"; MOUNT_PATH="/mnt/starrocks-be"
+# 기존 시그니처 정리(파티션 + 디스크 전체)
+sudo wipefs -a /dev/sda1
+sudo wipefs -a /dev/sda
 
-wipefs -a "${DEVICE}1"; wipefs -a "$DEVICE"
+# p1=Ceph용 300GB
+sudo parted -s /dev/sda mklabel msdos
+sudo parted -s /dev/sda mkpart primary 1MiB 300GB
 
-# p1=Ceph용, p2=나머지(XFS)
-parted -s "$DEVICE" mklabel msdos
-parted -s "$DEVICE" mkpart primary 1MiB "$CEPH_SIZE"
-parted -s "$DEVICE" mkpart primary "$CEPH_SIZE" 100%
-partprobe "$DEVICE"
+# p2=나머지(XFS)
+sudo parted -s /dev/sda mkpart primary 300GB 100%
+sudo partprobe /dev/sda
 
 # BlueStore는 원본 디스크 크기 기준 1GB/10GB/107GB 지점에 레이블을 중복 저장한다.
 # 앞부분 일부만 지우면 이 레이블이 남아 Rook이 "기존 OSD 확장"으로 오판해 계속 크래시한다 —
 # 110GiB(112640MB)는 이 세 지점을 전부 덮기 위한 여유값(ceph-bluestore-tool show-label로 실제 위치 확인 가능)
-dd if=/dev/zero of="${DEVICE}1" bs=1M count=112640
+sudo dd if=/dev/zero of=/dev/sda1 bs=1M count=112640
 
-mkfs.xfs -f "${DEVICE}2"
-mkdir -p "$MOUNT_PATH"
-mount "${DEVICE}2" "$MOUNT_PATH"
+# 나머지 파티션을 XFS로 포맷
+sudo mkfs.xfs -f /dev/sda2
 
-# 디바이스 이름이 아니라 UUID로 등록 — 재부팅 시 디바이스 순서가 바뀌어도 안전
-UUID=$(blkid -s UUID -o value "${DEVICE}2")
-echo "UUID=${UUID} ${MOUNT_PATH} xfs defaults 0 2" | tee -a /etc/fstab
+# 마운트 경로 생성 + 마운트
+sudo mkdir -p /mnt/starrocks-be
+sudo mount /dev/sda2 /mnt/starrocks-be
+
+# 재부팅해도 안 바뀌는 UUID 확인
+sudo blkid -s UUID -o value /dev/sda2
+
+# 디바이스 이름이 아니라 UUID로 fstab에 등록 — 재부팅 시 디바이스 순서가 바뀌어도 안전
+# (예: UUID=2e346eca-8a4d-4d59-8897-4b5d84aefdc3  /mnt/starrocks-be  xfs  defaults  0  2)
 ```
 결과: 3노드 전부 OSD 300G로 균등화됐다(`ceph osd df` VAR 1.00/1.00, STDDEV 0.01). 나머지는 `/mnt/starrocks-be`에 마운트.
 
@@ -267,13 +297,13 @@ RGW VIP는 MetalLB LoadBalancer로 노출된다. 클러스터 안팎 어디서�
 annotations/labels만 지원한다. Rook 소유 `rook-ceph-rgw-*` Service를 `kubectl patch`로 LoadBalancer로 바꿔도 operator가 reconcile할 때마다 ClusterIP로 되돌린다. Rook 소유 Service는 그대로 두고, 같은 파드 라벨을 셀렉터로 쓰는 별도 Service를 만들어 그것만 LoadBalancer로 노출해서 해결했다.
 
 ### operator reconcile이 에러 없이 조용히 멈춘다
-CephCluster CR을 두 번 apply했을 때(리소스 버전 충돌 이후 mon-a만 뜨고 멈춤), CephBlockPool 생성 때도(로그엔 "successfully configured"까지 찍히는데 실제 풀은 안 생김) 같은 패턴이 나왔다. `kubectl rollout restart deployment/rook-ceph-operator`로 reconcile을 처음부터 다시 돌리면 정상 진행됐다. 진행이 몇 분 이상 안 보이면 우선 operator 재시작부터 시도한다.
+CephCluster CR을 두 번 apply했을 때 같은 패턴이 나왔다(리소스 버전 충돌 이후 mon-a만 뜨고 멈춤). CephBlockPool을 생성할 때도 마찬가지였다(로그엔 "successfully configured"까지 찍히는데 실제 풀은 안 생김). `kubectl rollout restart deployment/rook-ceph-operator`로 reconcile을 처음부터 다시 돌리면 정상 진행됐다. 진행이 몇 분 이상 안 보이면 우선 operator 재시작부터 시도한다.
 
 ### RGW가 계속 멈춘 진짜 원인은 방화벽의 same-node hairpin 누락
 같은 노드(llm001) 안에서 pod network 파드가 hostNetwork Ceph 데몬에 접근할 때 소스 IP가 물리 LAN 대역이 아니라 pod CIDR(`10.244.0.0/16`)로 보인다. 방화벽에 안 걸려 TCP 연결 자체가 막혔다. `rados`/`radosgw-admin` 명령이 에러 없이 그냥 멈춰서(수 분씩 대기) Rook 버그로 오인하기 쉽다. `ceph tell osd.<N> version`으로 개별 데몬 응답성을 하나씩 확인해서 특정 OSD 하나만 무응답인 걸로 좁혀야 찾을 수 있다. 방화벽에 pod CIDR 소스 예외 규칙을 추가해서 해결했다(3노드 모두 필요).
 
 ### CephObjectStore 삭제가 자기 자신을 참조하는 순환으로 멈춘다
-방화벽 문제로 실패했던 시도가 `.rgw.root`에 realm/zonegroup/zone(RGW의 다중 사이트 구성 단위 — 여기선 실질적으로 이름표 역할)은 있지만 period가 없는 반쪽 상태를 남겼다. 이 CR을 지울 때 finalizer(리소스가 실제로 삭제되기 전에 강제로 거쳐야 하는 정리 훅)가 "버킷이 있는지" 확인하려고 RGW 자신의 HTTP API를 호출한다. 그런데 그 RGW는 뜬 적이 없어서 연결 거부로 finalizer가 영원히 안 끝난다. 버킷이 존재한 적 없음을 확인한 뒤 finalizer를 강제로 비우고, 남은 rados(Ceph의 raw 오브젝트 저장 계층) 오브젝트/풀을 직접 정리한 뒤 재생성했다.
+방화벽 문제로 실패했던 시도가 `.rgw.root`에 realm/zonegroup/zone(RGW의 다중 사이트 구성 단위 — 여기선 실질적으로 이름표 역할)은 있지만 period가 없는 반쪽 상태를 남겼다. 이 CR을 지울 때 finalizer(리소스가 실제로 삭제되기 전에 강제로 거쳐야 하는 정리 훅)가 "버킷이 있는지" 확인하려고 RGW 자신의 HTTP API를 호출한다. 그런데 그 RGW는 뜬 적이 없어서 연결 거부로 finalizer가 영원히 안 끝난다. 버킷이 존재한 적 없음을 확인한 뒤 finalizer를 강제로 비웠다. 남은 rados(Ceph의 raw 오브젝트 저장 계층) 오브젝트/풀을 직접 정리하고 재생성했다.
 
 ## 검증 명령
 

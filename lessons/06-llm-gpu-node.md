@@ -4,15 +4,15 @@
 
 ## 목적
 
-GPU 리소스(`nvidia.com/gpu`)를 k8s가 직접 스케줄링 대상으로 관리하게 만들어서, LLM 추론/배치 작업을 다른 워크로드와 동일한 방식(Deployment/Job, 재시작, 헬스체크, 향후 노드 추가 시 자동 확장)으로 다룰 수 있게 한다. 동시에 물리 노드가 3대로 늘어난 김에 etcd를 진짜 홀수 쿼럼으로 구성해서 컨트롤플레인 단일 장애점을 없앤다.
+GPU 리소스(`nvidia.com/gpu`)를 k8s가 직접 스케줄링 대상으로 관리하게 만든다. 그러면 LLM 추론/배치 작업을 다른 워크로드와 동일한 방식(Deployment/Job, 재시작, 헬스체크, 향후 노드 추가 시 자동 확장)으로 다룰 수 있다. 동시에 물리 노드가 3대로 늘어난 김에 etcd를 진짜 홀수 쿼럼으로 구성해서 컨트롤플레인 단일 장애점을 없앤다.
 
 ## 설계 결정
 
 - **드라이버는 완전 제거 후 재설치.** 기존 드라이버가 동작은 하고 있었지만 `ubuntu-drivers devices`가 추천하는 최신 브랜치가 아니었다. 부분 업그레이드보다 관련 패키지를 다 지우고 추천 버전을 새로 까는 쪽이 상태가 더 명확하다.
 - **containerd 기본 런타임을 nvidia로 직접 지정.** nvidia-container-runtime은 GPU를 요청하지 않는 일반 컨테이너에는 runc와 동일하게 동작하므로, 이 노드에 일반 파드가 같이 떠도 문제없다. RuntimeClass로 일반/GPU를 구분할 필요 없이 기본값 자체를 nvidia로 바꾸는 쪽이 더 단순하다.
-- **GPU 배타성은 taint가 아니라 리소스 요청으로 확보.** 처음엔 `nvidia.com/gpu` taint로 이 노드를 GPU 전용으로 막아뒀는데, 그러면 일반 워크로드가 이 노드를 아예 못 쓰게 되어 자원이 노는 문제가 있었다. 실제로는 `nvidia.com/gpu` 리소스를 실제로 가진 노드가 이 노드뿐이라, GPU를 요청하는 파드는 taint 없이도 스케줄러가 자동으로 여기로만 보낸다 — taint를 완전히 제거하고 라벨(`nvidia.com/gpu=true`, device-plugin의 nodeSelector용)만 남겼다. device-plugin의 toleration은 `operator: Exists`(모든 taint 허용)로 남겨뒀는데, 이 노드가 다시 컨트롤플레인 taint 같은 걸 받게 되더라도 매번 맞춰줄 필요 없게 하기 위함.
+- **GPU 배타성은 taint가 아니라 리소스 요청으로 확보.** 처음엔 `nvidia.com/gpu` taint로 이 노드를 GPU 전용으로 막아뒀는데, 그러면 일반 워크로드가 이 노드를 아예 못 쓰게 되어 자원이 노는 문제가 있었다. 실제로는 `nvidia.com/gpu` 리소스를 실제로 가진 노드가 이 노드뿐이다. 그래서 GPU를 요청하는 파드는 taint 없이도 스케줄러가 자동으로 여기로만 보낸다. taint를 완전히 제거하고 라벨(`nvidia.com/gpu=true`, device-plugin의 nodeSelector용)만 남겼다. device-plugin의 toleration은 `operator: Exists`(모든 taint 허용)로 남겨뒀는데, 이 노드가 다시 컨트롤플레인 taint 같은 걸 받게 되더라도 매번 맞춰줄 필요 없게 하기 위함.
 - **컨트롤플레인 확장은 3대 전부를 스택 etcd로.** etcd는 과반수(quorum) 투표로 동작해서 짝수 대수는 오히려 손해다(2대는 1대 죽으면 과반 자체가 불가능해져서 1대짜리보다 나을 게 없음). 물리 노드가 정확히 3대뿐이라 "컨트롤플레인 전용 노드"를 따로 뺄 여유가 없어서, 3대 모두를 컨트롤플레인 겸 워커로 쓰는 kubeadm의 stacked etcd 토폴로지를 그대로 채택했다.
-- **컨트롤플레인 taint는 3대 전부 제거.** chan09/llm001까지 컨트롤플레인 taint가 붙으면 3대 전부가 "허가 없이는 못 들어오는" 노드가 되어버려서, toleration 없는 일반 워크로드(cert-manager, metallb-controller 등)가 클러스터 어디에도 못 뜨는 상태가 됐다. 처음엔 chan08만(원래 유일한 컨트롤플레인이었던 이력 + MySQL 소스를 겸하는 노드라는 이유로) taint를 남겨뒀으나, 3대가 이제 구조적으로 완전히 동일한 역할(컨트롤플레인+워커)이라 굳이 하나만 다르게 취급할 근거가 약해서 chan08의 taint도 마저 제거해 3대를 완전히 대칭으로 통일했다. llm001의 `nvidia.com/gpu` taint도 이후 제거했다 — GPU 배타성은 taint가 아니라 리소스 요청만으로 충분해서, taint를 남겨두는 건 일반 워크로드가 이 노드를 못 쓰게 막는 손해만 있었다 (위 설계 결정 참고). 결과적으로 3대 전부 taint가 없다. kubeadm이 컨트롤플레인 승격 시 taint 말고 `node.kubernetes.io/exclude-from-external-load-balancers` 라벨도 같이 붙이는데, 이건 뒤늦게(MetalLB VIP가 통째로 죽인 뒤에야) 발견해서 별도로 제거했다 — 자세한 내용은 아래 "알려진 이슈" 참고.
+- **컨트롤플레인 taint는 3대 전부 제거.** chan09/llm001까지 컨트롤플레인 taint가 붙으면 3대 전부가 "허가 없이는 못 들어오는" 노드가 되어버려서, toleration 없는 일반 워크로드(cert-manager, metallb-controller 등)가 클러스터 어디에도 못 뜨는 상태가 됐다. 처음엔 chan08만(원래 유일한 컨트롤플레인이었던 이력 + MySQL 소스를 겸하는 노드라는 이유로) taint를 남겨뒀다. 하지만 3대가 이제 구조적으로 완전히 동일한 역할(컨트롤플레인+워커)이라 굳이 하나만 다르게 취급할 근거가 약했다. 그래서 chan08의 taint도 마저 제거해 3대를 완전히 대칭으로 통일했다. llm001의 `nvidia.com/gpu` taint도 이후 제거했다 — GPU 배타성은 taint가 아니라 리소스 요청만으로 충분해서, taint를 남겨두는 건 일반 워크로드가 이 노드를 못 쓰게 막는 손해만 있었다 (위 설계 결정 참고). 결과적으로 3대 전부 taint가 없다. kubeadm이 컨트롤플레인 승격 시 taint 말고 `node.kubernetes.io/exclude-from-external-load-balancers` 라벨도 같이 붙이는데, 이건 뒤늦게(MetalLB VIP가 통째로 죽인 뒤에야) 발견해서 별도로 제거했다 — 자세한 내용은 아래 "알려진 이슈" 참고.
 - **API 서버 VIP는 keepalived로, 기존 MySQL VIP와 같은 방식.** 별도 로드밸런서 없이 MetalLB(L2 ARP)와 원리가 다른, 호스트 native VRRP 방식을 그대로 재사용했다. VIP를 들고 있는 노드는 자기 자신의 apiserver(0.0.0.0:6443 바인딩)가 그대로 응답하므로 별도 프록시(haproxy 등)가 필요 없다 — 노드 하나가 죽으면 다음 우선순위 노드로 VIP가 넘어가고, 그 노드의 로컬 apiserver가 바로 이어받는다. 이 VIP는 애초에 [`02-k8s-cluster.md`](02-k8s-cluster.md)에서 컨트롤플레인을 처음 만들 때부터 `controlPlaneEndpoint`로 잡아뒀기 때문에, 이번에 컨트롤플레인을 늘릴 때는 인증서를 재발급하거나 클러스터 설정을 손댈 필요 없이 새 노드에 BACKUP 인스턴스만 추가하면 됐다.
 - **VM으로 etcd를 옮기지 않음.** etcd 데이터 디렉터리는 이미 nvme(OS 루트)에 있고 MySQL/KVM 데이터는 별도 물리 디스크(`/data`)에 있어서, 디스크 I/O 경합은 애초에 거의 없다. VM 이전은 CPU/메모리 격리는 얻지만 디스크 격리는 별도 디스크를 새로 안 주는 한 얻는 게 없고, 브리지 네트워킹 구성부터 다시 해야 해서 비용 대비 실익이 낮다고 판단했다.
 
@@ -47,9 +47,9 @@ flowchart TB
     KUBECTL["kubectl / kubelet"] --> VIP
 ```
 
-**장점**: GPU를 `nvidia.com/gpu` 리소스로 선언하면 k8s 스케줄러가 알아서 GPU 있는 노드에만 파드를 배치해준다 — 배치 작업(Job)이든 상시 추론 서버(Deployment)든 다른 워크로드와 완전히 같은 방식(재시작 정책, 리소스 상한, 롤아웃)으로 관리된다. 나중에 GPU 노드가 늘어나도 라벨만 똑같이 걸어주면 자동으로 스케줄링 대상에 포함된다 (GPU 배타성은 taint가 아니라 리소스 요청 자체로 확보되므로 taint는 불필요).
+**장점**: GPU를 `nvidia.com/gpu` 리소스로 선언하면 k8s 스케줄러가 알아서 GPU 있는 노드에만 파드를 배치해준다. 배치 작업(Job)이든 상시 추론 서버(Deployment)든 다른 워크로드와 완전히 같은 방식(재시작 정책, 리소스 상한, 롤아웃)으로 관리된다. 나중에 GPU 노드가 늘어나도 라벨만 똑같이 걸어주면 자동으로 스케줄링 대상에 포함된다. GPU 배타성은 taint가 아니라 리소스 요청 자체로 확보되므로 taint는 불필요하다.
 
-**실사용 예**: `resources.limits: {nvidia.com/gpu: 1}`을 선언한 파드는 자동으로 llm001에만 배치된다 (컨테이너 안에서 `nvidia-smi`를 실행해보면 GPU가 그대로 인식된다). 추론 서버를 Deployment로 올리면 컨테이너가 죽어도 k8s가 재시작해주고, 향후 서빙 스택(vLLM 등)을 Job/Deployment 매니페스트만 바꿔서 교체할 수 있다.
+**실사용 예**: `resources.limits: {nvidia.com/gpu: 1}`을 선언한 파드는 자동으로 llm001에만 배치된다. 컨테이너 안에서 `nvidia-smi`를 실행해보면 GPU가 그대로 인식된다. 추론 서버를 Deployment로 올리면 컨테이너가 죽어도 k8s가 재시작해준다. 향후 서빙 스택(vLLM 등)을 Job/Deployment 매니페스트만 바꿔서 교체할 수 있다.
 
 ## 스크립트 목록 (이름 순)
 
@@ -57,33 +57,31 @@ flowchart TB
 - 설명: 기존에 다른 용도로 쓰던 UFW 호스트에 k8s 컨트롤플레인+워커 포트를 추가한다 (`01-provision`을 거치지 않고 편입되는 서버용).
 - 스크립트: [`00-open-k8s-firewall-ports.sh`](../scripts/06-llm-gpu-node/00-open-k8s-firewall-ports.sh)
 ```bash
-SUBNET="10.5.5.0/24"
-
 # kubelet API
-sudo ufw allow from "$SUBNET" to any port 10250 proto tcp comment 'kubelet API'
+sudo ufw allow from 10.5.5.0/24 to any port 10250 proto tcp comment 'kubelet API'
 
 # NodePort
-sudo ufw allow from "$SUBNET" to any port 30000:32767 proto tcp comment 'NodePort'
+sudo ufw allow from 10.5.5.0/24 to any port 30000:32767 proto tcp comment 'NodePort'
 
 # Flannel VXLAN
-sudo ufw allow from "$SUBNET" to any port 8472 proto udp comment 'Flannel VXLAN'
+sudo ufw allow from 10.5.5.0/24 to any port 8472 proto udp comment 'Flannel VXLAN'
 
 # k8s API server
-sudo ufw allow from "$SUBNET" to any port 6443 proto tcp comment 'k8s API server'
+sudo ufw allow from 10.5.5.0/24 to any port 6443 proto tcp comment 'k8s API server'
 
 # etcd
-sudo ufw allow from "$SUBNET" to any port 2379:2380 proto tcp comment 'etcd'
+sudo ufw allow from 10.5.5.0/24 to any port 2379:2380 proto tcp comment 'etcd'
 
 # kube-controller-manager / kube-scheduler
-sudo ufw allow from "$SUBNET" to any port 10257 proto tcp comment 'kube-controller-manager'
-sudo ufw allow from "$SUBNET" to any port 10259 proto tcp comment 'kube-scheduler'
+sudo ufw allow from 10.5.5.0/24 to any port 10257 proto tcp comment 'kube-controller-manager'
+sudo ufw allow from 10.5.5.0/24 to any port 10259 proto tcp comment 'kube-scheduler'
 
 # keepalived VRRP (컨트롤플레인 API VIP)
-sudo ufw allow from "$SUBNET" proto vrrp comment 'keepalived VRRP (컨트롤플레인 API VIP)'
+sudo ufw allow from 10.5.5.0/24 proto vrrp comment 'keepalived VRRP (컨트롤플레인 API VIP)'
 
 # MetalLB memberlist (speaker 간 리더 선출용 가십 프로토콜)
-sudo ufw allow from "$SUBNET" to any port 7946 proto tcp comment 'MetalLB memberlist'
-sudo ufw allow from "$SUBNET" to any port 7946 proto udp comment 'MetalLB memberlist'
+sudo ufw allow from 10.5.5.0/24 to any port 7946 proto tcp comment 'MetalLB memberlist'
+sudo ufw allow from 10.5.5.0/24 to any port 7946 proto udp comment 'MetalLB memberlist'
 
 sudo ufw reload
 ```

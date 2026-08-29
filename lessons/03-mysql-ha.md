@@ -4,7 +4,9 @@
 
 chan08(source) ↔ chan09(replica), semi-sync 복제, keepalived VIP `10.5.5.4`로 페일오버.
 
-MySQL 8.0.46, datadir `/data/mysql`, `innodb_buffer_pool_size=2G`. k8s 밖에 호스트 네이티브로 설치 — 클러스터가 흔들려도 데이터는 별도로 보호하기 위함.
+## 목적
+
+MySQL을 k8s 밖에 호스트 네이티브로 설치한다. 클러스터가 흔들려도 데이터는 별도로 보호하기 위해서다. 버전은 8.0.46, datadir은 `/data/mysql`, `innodb_buffer_pool_size=2G`로 튜닝한다.
 
 ## 설계 결정
 
@@ -173,7 +175,7 @@ sudo touch /etc/keepalived/allow_master
 sudo systemctl restart keepalived
 ```
 
-**게이트 파일의 용도**: 장애로 반대쪽이 소스로 수동 승격된 뒤, 원래 노드가 재부팅 등으로 되살아나도 keepalived 우선순위(chan08=150 > chan09=100) 때문에 **자동으로 VIP를 다시 뺏어가는 것(페일백)을 막기 위함**이다. `mysqladmin ping`은 "mysqld가 응답하는지"만 볼 뿐 "데이터가 최신인지"는 전혀 확인 안 하므로, 그대로 두면 오래된 데이터를 가진 노드로 쓰기 트래픽이 몰릴 위험이 있다. 실제 장애 시 대응 순서:
+**게이트 파일의 용도**: 장애로 반대쪽이 소스로 수동 승격된 뒤, 원래 노드가 재부팅 등으로 되살아날 수 있다. 이때 keepalived 우선순위(chan08=150 > chan09=100) 때문에 그대로 두면 **자동으로 VIP를 다시 뺏어간다(페일백)** — 게이트 파일은 이 페일백을 막기 위한 장치다. `mysqladmin ping`은 "mysqld가 응답하는지"만 볼 뿐 "데이터가 최신인지"는 전혀 확인 안 하므로, 그대로 두면 오래된 데이터를 가진 노드로 쓰기 트래픽이 몰릴 위험이 있다. 실제 장애 시 대응 순서:
 1. chan09를 소스로 수동 승격 (기존 "애플리케이션 연결" 절차)
 2. chan08의 게이트 파일 제거: `sudo rm /etc/keepalived/allow_master` — 이후 chan08의 mysqld가 살아나도 마스터 후보에서 계속 배제됨
 3. chan08을 chan09의 새 레플리카로 재동기화
@@ -193,7 +195,7 @@ Ubuntu 기본 `mysqld.cnf`의 `datadir` 줄은 `# datadir = /var/lib/mysql`처�
 - **"진짜 장애냐 순간 블립이냐" 판단은 여전히 사람 몫이다.** 게이트 파일이 이 판단 자체를 대신해주지는 않는다 — chan08이 잠깐 재부팅된 것뿐이고 chan09가 실제로 승격된 적이 없다면, 게이트 파일을 안 건드리고 그냥 두는 게 맞다(정상적인 우선순위 기반 자동 복귀가 오히려 맞는 동작).
 - **`vrrp_script`에 `weight`를 설정하지 않았기 때문에, 헬스체크 실패 시 우선순위가 깎이는 게 아니라 그 인스턴스가 선거에서 완전히 배제(FAULT)된다.** 의도한 동작이지만, 나중에 누군가 `weight`를 추가하면 이 배제 동작이 "우선순위 소폭 감소"로 바뀌어서 게이트가 무력화될 수 있다.
 
-## 페일오버 동작 검증 (2026-08-24 완료)
+## 검증 이력 (2026-08-24)
 
 1. chan08 `mysql` 정지 → keepalived 헬스체크(`interval 2, fall 3`, 약 6초)가 실패 감지 → VIP가 chan09로 이동 확인
 2. chan08 `mysql` 재기동 → priority(150 > 100)로 preemptive하게 VIP가 chan08로 복귀
@@ -207,7 +209,7 @@ Ubuntu 기본 `mysqld.cnf`의 `datadir` 줄은 `# datadir = /var/lib/mysql`처�
 
 MySQL 클라이언트는 **VIP `10.5.5.4:3306`**으로 접속. 어느 쪽이 source인지 신경 쓸 필요 없이 keepalived가 항상 현재 source(우선순위가 높은 쪽, 정상 시 chan08)로 트래픽을 보낸다.
 
-주의: 이 구성은 자동 페일오버(VIP 이동)만 하고, **레플리카를 자동으로 새 source로 승격하지 않는다** (semi-sync replica는 여전히 chan08을 SOURCE_HOST로 바라봄). chan08 자체가 완전히 죽는 실제 장애 시엔 chan09를 수동으로 승격(`RESET REPLICA ALL`, 쓰기 허용 등)해야 한다. Stage 1 범위에서는 "VIP 자동 전환 + 승격은 수동" 정도로 충분하다고 판단했다 (트래픽이 작고, 운영자가 상주하는 환경).
+주의: 이 구성은 자동 페일오버(VIP 이동)만 한다. **레플리카를 자동으로 새 source로 승격하지 않는다** — semi-sync replica는 여전히 chan08을 SOURCE_HOST로 바라본다. chan08 자체가 완전히 죽는 실제 장애 시엔 chan09를 수동으로 승격(`RESET REPLICA ALL`, 쓰기 허용 등)해야 한다. Stage 1 범위에서는 "VIP 자동 전환 + 승격은 수동" 정도로 충분하다고 판단했다. 트래픽이 작고 운영자가 상주하는 환경이기 때문이다.
 
 ## 검증 명령
 

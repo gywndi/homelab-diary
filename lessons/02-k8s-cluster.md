@@ -2,7 +2,9 @@
 
 chan08(컨트롤플레인) + chan09(워커), CNI는 Flannel. Kubernetes v1.36.4 (dl.k8s.io stable 채널 기준 자동 선택).
 
-컨트롤플레인은 처음부터 keepalived VIP(10.5.5.3)를 공유 진입점(`controlPlaneEndpoint`)으로 잡고 시작한다. 지금은 그 VIP를 chan08 혼자 들고 있어서 "VIP 하나에 백엔드 하나"인 셈이지만, 나중에 컨트롤플레인 노드가 늘어나도([`06-llm-gpu-node.md`](06-llm-gpu-node.md) 참고) 주소 체계를 바꿀 필요가 없다는 게 핵심이다. 왜 이 순서가 중요한지는 아래 "알려진 이슈: 고정 IP로 시작하면 나중에 힘들다"에 정리해뒀다.
+## 목적
+
+2노드 k8s 클러스터의 기본 골격을 만든다. 컨트롤플레인은 처음부터 keepalived VIP(10.5.5.3)를 공유 진입점(`controlPlaneEndpoint`)으로 잡고 시작한다. 지금은 그 VIP를 chan08 혼자 들고 있다 — "VIP 하나에 백엔드 하나"인 셈이다. 나중에 컨트롤플레인 노드가 늘어나도([`06-llm-gpu-node.md`](06-llm-gpu-node.md) 참고) 주소 체계를 바꿀 필요가 없다는 게 핵심이다. 왜 이 순서가 중요한지는 아래 "알려진 이슈: 고정 IP로 시작하면 나중에 힘들다"에 정리해뒀다.
 
 ## 스크립트 목록 (이름 순)
 
@@ -94,8 +96,8 @@ mkdir -p ~/.kube
 # 초기화 시 생성된 관리자 인증서를 일반 계정이 쓸 위치로 복사 (server 주소는 위 VIP로 자동 설정됨)
 sudo cp -i /etc/kubernetes/admin.conf ~/.kube/config
 
-# sudo 없이 kubectl을 쓸 수 있도록 소유자 변경
-sudo chown "$USER":"$USER" ~/.kube/config
+# sudo 없이 kubectl을 쓸 수 있도록 소유자 변경 (설정 파일 + 디렉터리 모두)
+sudo chown chan:chan ~/.kube/config ~/.kube
 ```
 `--upload-certs`는 컨트롤플레인 인증서를 클러스터 안에(암호화해서) 미리 올려두는 옵션이다. 나중에 다른 노드를 컨트롤플레인으로 추가할 때, 그 인증서를 받아올 임시 열쇠(`--certificate-key`)를 매번 새로 발급받아 쓴다 — 이 열쇠는 2시간짜리라 지금 당장 안 쓰면 그냥 버려지고, 필요할 때 `kubeadm init phase upload-certs --upload-certs`로 다시 만들면 된다.
 
@@ -224,7 +226,7 @@ etcd 스냅샷을 파드 밖으로 꺼내려고 `kubectl cp`를 쓰면 `tar: exe
 
 또한 `etcdctl`에는 3.6부터 `snapshot status`가 없다 — 스냅샷 무결성 확인은 오프라인 전용 도구인 `etcdutl`로 해야 한다(둘 다 이미지 안에 들어있음).
 
-## 검증
+## 검증 명령
 
 ```bash
 # 노드 상태 확인 (chan08, chan09 모두 Ready여야 함)

@@ -63,14 +63,16 @@ kubectl -n metallb-system get ipaddresspool,l2advertisement
 
 ## VIP를 다른 IP로 옮기기
 
+옮길 IP는 상황마다 다르므로 `<새 VIP>`는 실제 값으로 바꿔서 실행한다 (애플리케이션 VIP 대역인 `10.5.5.50~99` 중 비어있는 IP — 대역 정책은 [내부 DNS](09-internal-dns.md#vip-이력) 참고).
+
 ```bash
 # IPAddressPool 자체를 바꾸면 됨 (진행 중인 연결은 끊길 수 있음)
 kubectl patch ipaddresspool ingress-pool -n metallb-system --type=merge \
-  -p '{"spec":{"addresses":["10.5.5.2/32"]}}'
+  -p '{"spec":{"addresses":["<새 VIP>/32"]}}'
 
 # Service에 고정해둔 IP annotation도 같이 갱신
 kubectl -n ingress-nginx annotate svc ingress-nginx-controller \
-  metallb.io/loadBalancerIPs=10.5.5.2 --overwrite
+  metallb.io/loadBalancerIPs=<새 VIP> --overwrite
 ```
 
 ## 흔한 장애 체크리스트

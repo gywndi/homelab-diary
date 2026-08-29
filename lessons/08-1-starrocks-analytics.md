@@ -1,6 +1,6 @@
 # StarRocks 분석 엔진 (FE/CN, shared-data 기반)
 
-MPP(대규모 병렬 처리) 방식의 컬럼형 OLAP 데이터베이스다. `starrocks` 네임스페이스에 FE(제어 평면) + CN(데이터 평면) 클러스터를 올렸다. 데이터는 로컬 디스크가 아니라 [Ceph RGW](07-1-ceph-storage.md)(오브젝트 스토리지)에 저장한다. 이 방식을 shared-data라 부른다.
+MPP(대규모 병렬 처리) 방식의 컬럼형 OLAP(Online Analytical Processing, 집계·분석 쿼리에 최적화된 처리 방식) 데이터베이스다. `starrocks` 네임스페이스에 FE(제어 평면) + CN(데이터 평면) 클러스터를 올렸다. 데이터는 로컬 디스크가 아니라 [Ceph RGW](07-1-ceph-storage.md)(오브젝트 스토리지)에 저장한다. 이 방식을 shared-data라 부른다.
 
 ## 목적
 
@@ -11,7 +11,7 @@ MPP(대규모 병렬 처리) 방식의 컬럼형 OLAP 데이터베이스다. `st
 StarRocks는 두 종류 노드로만 구성된다. Hive/Spark처럼 별도 메타스토어나 리소스 매니저가 필요 없다.
 
 - **FE(Frontend)**: 제어 평면이다. 전체 카탈로그(DB/테이블/파티션/버킷 정의)를 메모리에 들고 있는다. 변경분은 BDBJE(Berkeley DB Java Edition, Paxos류 합의 프로토콜)로 다른 FE에 복제한다. 오직 leader FE만 메타데이터를 쓸 수 있다. follower는 쓰기 요청을 leader로 전달만 한다. 읽기(SELECT)는 follower도 직접 처리할 수 있다. SQL도 FE가 처리한다 — Parser → Analyzer → CBO(비용 기반 최적화) → Coordinator(물리 실행계획을 CN들에 분산 스케줄링) 순서다. 메타데이터는 오브젝트 스토리지가 아니라 FE 자신의 로컬 디스크에 저장된다. 그래서 FE에는 RBD PVC(10Gi)가 필요하다.
-- **CN(Compute Node)**: 데이터 평면이다. 로컬 영구 저장이 없다는 점만 빼면 실행 엔진은 BE(shared-nothing 모드의 데이터 평면)와 같다. 쿼리에 필요한 데이터를 오브젝트 스토리지에서 읽어와 Data Cache(로컬 디스크 캐시)에 저장한다. 다음 쿼리부터는 캐시를 먼저 본다. 없으면 원격에서 가져와 캐싱하면서 응답한다. 그래서 첫 쿼리는 느리고 이후는 빠르다. Compaction(작은 데이터 조각들을 큰 조각으로 병합하는 작업)도 CN이 실행한다. 압축 결과는 오브젝트 스토리지에 새로 쓰이고, 오래된 버전은 별도 vacuum 작업으로 나중에 정리된다.
+- **CN(Compute Node)**: 데이터 평면이다. 로컬 영구 저장이 없다는 점만 빼면 실행 엔진은 BE(Backend, shared-nothing 모드의 데이터 평면)와 같다. 쿼리에 필요한 데이터를 오브젝트 스토리지에서 읽어와 Data Cache(로컬 디스크 캐시)에 저장한다. 다음 쿼리부터는 캐시를 먼저 본다. 없으면 원격에서 가져와 캐싱하면서 응답한다. 그래서 첫 쿼리는 느리고 이후는 빠르다. Compaction(작은 데이터 조각들을 큰 조각으로 병합하는 작업)도 CN이 실행한다. 압축 결과는 오브젝트 스토리지에 새로 쓰인다. 오래된 버전은 별도 vacuum 작업으로 나중에 정리된다.
 
 ```mermaid
 flowchart LR
@@ -75,8 +75,8 @@ command: ["/opt/starrocks/fe/bin/start_fe.sh"]   # 이미지 기본 CMD로는 �
 - 설명: CN을 배포하고 FE에 등록한다. `SHOW BACKENDS`/`SHOW COMPUTE NODES`로 Alive 확인. 3노드 전체에 두려면 이름/노드만 바꿔 반복 실행한다.
 - 스크립트: [`02-deploy-cn.sh`](../scripts/08-starrocks/02-deploy-cn.sh) + [`cn.conf`](../scripts/08-starrocks/cn.conf)
 ```sql
-ALTER SYSTEM ADD COMPUTE NODE "cn-0.cn-hl.starrocks.svc.cluster.local:9050";
 -- IP로 등록하면 파드 재시작마다 깨진다. headless Service FQDN으로 등록해야 안전하다.
+ALTER SYSTEM ADD COMPUTE NODE "cn-0.cn-hl.starrocks.svc.cluster.local:9050";
 ```
 
 ### end-to-end 검증
@@ -95,9 +95,9 @@ ALTER SYSTEM ADD COMPUTE NODE "cn-0.cn-hl.starrocks.svc.cluster.local:9050";
 - 설명: StarRocks는 MySQL 프로토콜(9030 포트)을 그대로 쓴다. 기존 MySQL 클라이언트 라이브러리를 그대로 쓸 수 있다.
 - 스크립트: [`app-sample.py`](../scripts/08-starrocks/app-sample.py)
 ```python
-conn = pymysql.connect(host="127.0.0.1", port=9030, user="root", password="", autocommit=True)
-# autocommit=True가 사실상 필수 — StarRocks는 로드/커밋 단위가 전통 RDBMS와 달라서,
+# autocommit=True가 사실상 필수다. StarRocks는 로드/커밋 단위가 전통 RDBMS와 다르다.
 # ORM의 암묵적 트랜잭션 관리에 의존하면 예상과 다르게 동작할 수 있다.
+conn = pymysql.connect(host="127.0.0.1", port=9030, user="root", password="", autocommit=True)
 ```
 클러스터 밖에서 실행하려면 먼저 `kubectl -n starrocks port-forward svc/fe 9030:9030`으로 포트포워딩한다. 클러스터 안이라면 `host`를 `fe.starrocks.svc.cluster.local`로 바꾼다.
 
@@ -107,7 +107,7 @@ curl --location-trusted -u root: \
   -H "label:my_load_$(date +%s)" \
   -H "column_separator:," \
   -T /path/to/data.csv \
-  "http://<FE host>:8030/api/<db>/<table>/_stream_load"
+  "http://fe.starrocks.svc.cluster.local:8030/api/<db>/<table>/_stream_load"
 ```
 응답 JSON의 `LoadTimeMs`/`WriteDataTimeMs`/`LoadBytes`로 처리량을 계산한다.
 
