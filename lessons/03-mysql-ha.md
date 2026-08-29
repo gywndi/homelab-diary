@@ -1,5 +1,7 @@
 # MySQL active/standby (Stage 1)
 
+> 이 구성은 이후 [Ceph RBD 기반 재배포](03-2-mysql-ceph-migration.md)로 대체됐다. 이 문서는 그 이전(Stage 1) 아키텍처 기록으로 남겨둔다.
+
 chan08(source) ↔ chan09(replica), semi-sync 복제, keepalived VIP `10.5.5.4`로 페일오버.
 
 MySQL 8.0.46, datadir `/data/mysql`, `innodb_buffer_pool_size=2G`. k8s 밖에 호스트 네이티브로 설치 — 클러스터가 흔들려도 데이터는 별도로 보호하기 위함.
