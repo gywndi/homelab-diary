@@ -2,7 +2,7 @@
 
 Stage 1(chan08/chan09 keepalived 페일오버)을 대체했다. 이제 단일 mysqld가 k8s Deployment + Ceph RBD PVC 위에서 돈다. 스토리지 배경은 [Ceph 스토리지](07-1-ceph-storage.md) 참고.
 
-> VIP는 이 문서에 적힌 `10.5.5.4`에서 2026-08-29에 `10.5.5.51`로 다시 옮겨졌다(애플리케이션 VIP 대역 정책 적용, [내부 DNS](09-internal-dns.md) 참고). 지금 실제 접속 주소는 `mysql.k8s.home`(도메인) 또는 `10.5.5.51`이다.
+> VIP는 이 문서에 적힌 `10.5.5.4`에서 2026-08-29에 옮겨졌다(애플리케이션 VIP 대역 정책 적용). 지금은 IP를 직접 쓰지 않고 **`mysql.k8s.home`** 도메인으로 접속한다 — [내부 DNS](09-internal-dns.md) 참고. VIP가 다시 바뀌어도 이 도메인만 갱신하면 된다.
 
 ## 목적
 

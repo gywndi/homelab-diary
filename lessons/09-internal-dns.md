@@ -12,6 +12,8 @@ MySQL 등 k8s 밖 애플리케이션이 클러스터 서비스에 붙을 때 IP�
 - **dnsmasq 대신 CoreDNS를 썼다.** k8s 자체가 이미 내부적으로 CoreDNS를 쓰고 있어서 검증된 이미지고 버전도 그대로 재사용했다(`registry.k8s.io/coredns/coredns:v1.14.2`, 클러스터의 `kube-system` CoreDNS와 동일 버전).
 - **모르는 도메인은 전부 공유기로 포워딩한다.** `k8s.home`, `mysql.k8s.home`처럼 등록된 이름만 직접 답하고, 나머지(구글/네이버 등 일반 인터넷 도메인)는 공유기(`10.5.5.1`)로 그대로 넘긴다. 이렇게 해야 LAN 클라이언트가 이 DNS를 주 DNS로 써도 인터넷 접속에 문제가 없다.
 - **VIP는 인프라 대역(`.20` 이하)에 둔다.** 처음엔 애플리케이션 VIP 대역(`.50~.99`)에 뒀다가, "DNS는 다른 서비스들이 의존하는 기반 인프라"라는 이유로 인프라 대역으로 재분류했다(아래 "VIP 이력" 참고).
+- **k8s 파드용 레코드는 여기 한 곳에만 둔다.** 파드는 기본적으로 `kube-system`의 클러스터 내부 CoreDNS를 쓰기 때문에 `k8s.home`을 그대로는 못 찾는다. 레코드를 `kube-system` CoreDNS에도 복사해 넣는 대신, `kube-system` CoreDNS가 `k8s.home` 도메인만 이 서버로 포워딩(위임)하게 만들었다 — 이게 Kubernetes 공식 문서에도 나오는 표준 패턴(stub domain)이다. 레코드가 한 곳에만 있으니 VIP가 바뀌어도 여기 하나만 고치면 된다.
+- **단일장애점은 레코드 복제가 아니라 replica 수로 없앤다.** `internal-dns`가 죽으면 LAN 클라이언트도, 파드도 같이 못 찾게 되니까, replica를 1→2로 늘려서(서로 다른 노드에 분산) 파드 하나 죽어도 나머지가 계속 응답하게 했다.
 
 ## 아키텍처
 
@@ -64,7 +66,7 @@ metadata:
   name: internal-dns
   namespace: internal-dns
 spec:
-  replicas: 1
+  replicas: 2   # 서로 다른 노드에 분산 — 파드 하나 죽어도 나머지가 응답
   selector: {matchLabels: {app: internal-dns}}
   template:
     metadata: {labels: {app: internal-dns}}
@@ -90,6 +92,21 @@ spec:
     - {name: dns-tcp, port: 53, targetPort: 53, protocol: TCP}
 ```
 
+### k8s 파드에서도 찾게 하기(stub domain 포워딩)
+- 설명: `kube-system`의 클러스터 내부 CoreDNS에 `k8s.home` 전용 서버 블록을 추가해서, 이 도메인만 우리 `internal-dns`(`10.5.5.2`)로 포워딩한다. 나머지 도메인(클러스터 서비스명, 일반 인터넷 도메인)은 기존 경로 그대로다.
+- 스크립트: 없음, `kube-system/coredns` ConfigMap에 아래 서버 블록을 기존 `.{ㅤ}` 블록 뒤에 추가
+```
+    k8s.home:53 {
+        errors
+        cache 30
+        forward . 10.5.5.2
+    }
+```
+```bash
+kubectl -n kube-system rollout restart deployment coredns
+kubectl -n kube-system rollout status deployment coredns --timeout=60s
+```
+
 ### 새 도메인 추가 / 설정 변경 반영
 - 설명: ConfigMap을 고친 뒤 파드를 재시작해야 반영된다(마운트된 ConfigMap은 자동 갱신에 최대 수십 초 걸릴 수 있어, 재시작으로 즉시 반영시켰다).
 ```bash
@@ -99,6 +116,9 @@ kubectl -n internal-dns rollout status deployment internal-dns --timeout=60s
 ```
 
 ## 알려진 이슈
+
+### k8s 파드 안에서는 기본적으로 이 도메인을 못 찾는다
+파드는 `kube-system`의 클러스터 내부 CoreDNS(`10.96.0.10`)를 쓴다. 이 CoreDNS는 모르는 도메인을 노드 자신의 `/etc/resolv.conf`로 포워딩하는데, 노드의 OS DNS는 우리 `internal-dns`를 모른다 — 그래서 `nslookup mysql.k8s.home`이 `NXDOMAIN`으로 실패했다. 노드의 OS DNS 자체를 바꾸는 대신(패키지 설치·이미지 pull 등 노드의 모든 DNS가 걸려있어 위험이 큼), `kube-system` CoreDNS에 `k8s.home` 전용 stub domain 포워딩만 추가해서 해결했다(위 "k8s 파드에서도 찾게 하기" 참고) — 이게 필요한 도메인만 정확히 위임하는 표준 방식이다.
 
 ### VIP를 옮기면 dig 테스트가 재시작 도중 일시적으로 실패한다
 `rollout restart` 직후 몇 초간은 파드가 교체되는 중이라 `dig`가 "connection refused"를 낼 수 있다. 실제 장애가 아니라 롤아웃 완료 대기가 안 된 것 — `rollout status`로 완료를 기다린 뒤 재시도하면 정상 응답한다.
@@ -122,4 +142,7 @@ CoreDNS의 VIP는 여러 번 옮겨졌다 — `10.5.5.11` → `.53`(애플리케
 dig @10.5.5.2 k8s.home +short          # 등록된 이름 확인
 dig @10.5.5.2 아무외부도메인.com +short   # 포워딩 확인(공유기 통해 정상 응답해야 함)
 kubectl -n internal-dns get pods
+
+# k8s 파드 안에서도 확인(stub domain 포워딩 검증)
+kubectl run dns-test --rm -i --restart=Never --image=busybox:1.36 --command -- nslookup mysql.k8s.home
 ```
