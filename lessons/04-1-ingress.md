@@ -171,3 +171,27 @@ replicas=2에 "노드당 1개"를 강제하는 `requiredDuringScheduling` anti-a
 
 ### 도메인 DNS가 없으면 챌린지가 그냥 멈춘 채 대기
 Ingress/Certificate를 만들어도 해당 도메인의 DNS A 레코드가 없으면 cert-manager의 self-check(`dial tcp: lookup ... no such host`)에서 계속 `pending`으로 멈춘다. 에러가 아니라 무한 대기라 상태만 보면 "안 되는 이유"를 알기 어렵다 — `kubectl describe challenge`로 Reason을 봐야 원인이 DNS 미설정인지 우리 쪽 설정 문제인지 구분된다.
+
+## 검증 명령
+
+```bash
+# MetalLB VIP가 실제로 할당됐는지
+kubectl -n metallb-system get ipaddresspool,l2advertisement
+kubectl -n ingress-nginx get svc ingress-nginx-controller   # EXTERNAL-IP가 10.5.5.50이어야 함
+
+# ingress-nginx가 양쪽 노드에 다 떠있는지 (anti-affinity로 노드당 1개 강제)
+kubectl -n ingress-nginx get pods -o wide
+
+# cert-manager가 정상 기동했는지
+kubectl -n cert-manager get pods
+
+# ClusterIssuer 둘 다 Ready인지
+kubectl get clusterissuer
+
+# 등록한 도메인의 인증서 발급 상태 (True/Ready여야 함)
+kubectl get certificate
+
+# 실제 HTTPS 요청까지 왕복하는지 (staging은 자체서명이라 -k 필요)
+curl -sk -o /dev/null -w '%{http_code}\n' https://<등록한 도메인>/
+```
+build 직후 인증서가 아직 `Issuing` 상태일 수 있다 — HTTP-01 챌린지(도메인 검증) + 실제 발급까지 수십 초에서 수 분 걸린다. 계속 `False`로 멈춰있으면 `kubectl describe challenge`로 원인을 본다(위 "알려진 이슈" 참고). 평소 운영 중 반복적으로 쓰는 명령은 [`04-2-ingress-ops.md`](04-2-ingress-ops.md) 참고.
