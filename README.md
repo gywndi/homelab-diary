@@ -41,4 +41,4 @@
 - [k8s 운영](lessons/ops-k8s.md) · [Ceph 운영](lessons/ops-ceph.md) · [StarRocks 운영](lessons/08-4-starrocks-ops.md) · [Ingress 운영](lessons/05-2-ingress-ops.md)
 - [리눅스 기본 상식](lessons/ops-linux-basics.md) — 위 운영 문서들에 나오는 명령을 이해하기 위한 systemd/UFW/디스크/LVM/SSH 등 공통 기초
 
-`lessons/`에 목적, 스크립트별 실행 명령, 설계 결정, 알려진 이슈가 정리되어 있다. `scripts/`에는 실행 스크립트 파일만 있다. `concepts/`에는 [Kubernetes 개념 정리](concepts/kubernetes.md), [Ceph 개념 정리](concepts/ceph.md), [StarRocks 개념 정리](concepts/starrocks.md)처럼 배경 개념 설명을 모아둔다.
+`lessons/`에 목적, 스크립트별 실행 명령, 설계 결정, 알려진 이슈가 정리되어 있다. `scripts/`에는 실행 스크립트 파일만 있다. `concepts/`에는 [Kubernetes 개념 정리](concepts/02-kubernetes.md), [Ceph 개념 정리](concepts/07-ceph.md), [StarRocks 개념 정리](concepts/08-starrocks.md)처럼 배경 개념 설명을 모아둔다 — 파일명 번호는 관련 `lessons/` 챕터 번호와 맞춰뒀다.

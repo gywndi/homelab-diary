@@ -136,7 +136,7 @@ FE 배치까지 끝낸 상태에서 CN을 1개→2개→3개로 늘려가며 두
 - 스크립트: [`14-real-sn-vs-shared-data-agg-tps.sh`](../scripts/08-starrocks/14-real-sn-vs-shared-data-agg-tps.sh)
 
 ### FE 코디네이터 분산 실험
-- 설명: FE Follower를 늘려 코디네이터 분산 효과를 확인했다(결과적으로 효과 없어 원복 — 이 절 본문 참고). 이후 투표에 영향 없는 Observer로 방향을 바꿨다 — [concepts/starrocks.md](../concepts/starrocks.md#fe-확장-follower-vs-observer)와 [17-add-fe-observer.sh](../scripts/08-starrocks/17-add-fe-observer.sh) 참고.
+- 설명: FE Follower를 늘려 코디네이터 분산 효과를 확인했다(결과적으로 효과 없어 원복 — 이 절 본문 참고). 이후 투표에 영향 없는 Observer로 방향을 바꿨다 — [concepts/08-starrocks.md](../concepts/08-starrocks.md#fe-확장-follower-vs-observer)와 [17-add-fe-observer.sh](../scripts/08-starrocks/17-add-fe-observer.sh) 참고.
 
 ### 수동 조작(스크립트 없음)
 FE 배치·CN 개수·RGW 게이트웨이 개수 실험은 별도 스크립트 없이 아래 명령을 그때그때 직접 실행했다.
