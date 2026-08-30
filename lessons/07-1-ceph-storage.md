@@ -259,20 +259,20 @@ RGW VIP(`ceph.home`, `10.5.5.4`)는 keepalived로 노출된다. 클러스터 안
 
 ## 알려진 이슈
 
-### 신규 클러스터는 커널 krbd와 호환 안 되는 cephx 키를 기본으로 쓴다
-Ceph Squid(19.x)는 클러스터를 처음 만들 때(`for_mkfs`) cephx 인증 키를 새 32바이트 암호(aes256k)로만 허용하도록 하드코딩한다. 우분투 24.04 커널의 `libceph.ko`(krbd 드라이버)는 이 형식을 몰라서 `libceph: secret too big 32` 에러로 매핑이 실패한다. `ceph-authtool --key-type aes`로 옛 16바이트 키를 만들어 수동 등록하는 우회는 안 통한다 — mon이 그 키로는 인증 핸드셰이크 자체를 거부한다("couldn't connect to the cluster"). 진짜 해법은 클러스터 설정을 되돌리는 것이다: `ceph mon set auth_allowed_ciphers "aes, aes256k"` + `ceph mon set auth_preferred_cipher aes`(부트스트랩 스크립트에 포함됨). 이후 만드는 cephx 키부터 krbd와 호환된다.
+### 신규 클러스터의 기본 인증키가 커널 krbd와 안 맞았다
+krbd(커널 RBD) 매핑이 `secret too big` 에러로 실패하는 문제가 있었다. Ceph 클러스터가 처음 생성될 때 잡는 기본 인증 방식이 원인이었다 — `ceph mon set auth_allowed_ciphers "aes, aes256k"`로 호환 모드를 열어 해결했다(부트스트랩 스크립트에 포함됨).
 
 ### `ceph orch daemon add osd`는 raw 파티션을 못 받는다
-"please pass LVs or raw block devices" 에러가 난다. LVM 논리 볼륨으로 한 겹 감싼 뒤(`pvcreate`/`vgcreate`/`lvcreate`) 그 LV 경로를 넘기면 된다.
+LVM 논리 볼륨으로 한 겹 감싼 뒤(`pvcreate`/`vgcreate`/`lvcreate`) 그 LV 경로를 넘기면 된다.
 
 ### 우분투 24.04(noble)엔 Ceph 공식 apt 저장소가 없다
-`cephadm add-repo --release squid`가 실패한다 — Ceph의 debian 저장소는 `bookworm`/`jammy`까지만 지원한다. `cephadm install ceph-common`을 실행하면 대신 우분투 자체 저장소의 버전(예: 19.2.3)이 깔리는데, 데몬 버전(19.2.6)과 안 맞아 `ceph` CLI로 클러스터에 붙으면 keyring 파싱 에러가 난다. 호스트에 깐 `ceph`/`rbd` CLI 대신 `cephadm shell -- ceph ...`(데몬과 항상 버전이 일치하는 컨테이너 안에서 실행)를 표준 경로로 쓴다.
+호스트에 `ceph`/`rbd` CLI를 직접 깔면 버전이 안 맞아 keyring 파싱 에러가 난다. `cephadm shell -- ceph ...`(데몬과 항상 버전이 일치하는 컨테이너 안에서 실행)를 표준 경로로 쓴다.
 
 ### ceph-csi는 공식 매니페스트에 없는 `ceph-config` ConfigMap을 요구한다
-`csi-rbdplugin`/`csi-rbdplugin-provisioner` 파드가 `ceph-config`라는 ConfigMap(`ceph.conf`/`keyring` 키)을 마운트하려고 하는데, ceph-csi의 yamlgen 매니페스트 세트엔 이 ConfigMap 생성 파일이 빠져있다. 빈 내용으로라도 직접 만들어줘야 파드가 뜬다.
+빈 내용으로라도 직접 만들어줘야 `csi-rbdplugin` 파드가 뜬다.
 
-### shared-nothing 로컬 스토리지 경로는 디스크 재분할 때마다 새로 만들어야 한다
-`/mnt/starrocks-be/sn-data`(StarRocks shared-nothing BE가 쓰는 hostPath)는 XFS 파티션 위 디렉터리라서, 파티션을 재포맷하면 같이 사라진다. BE를 다시 배포하기 전에 노드마다 다시 만들어야 한다.
+### 디스크를 재분할하면 그 위 hostPath 디렉터리도 같이 사라진다
+StarRocks shared-nothing BE가 쓰는 `/mnt/starrocks-be/sn-data`는 XFS 파티션 위 디렉터리라서, 파티션을 다시 나누면 같이 없어진다. BE를 다시 배포하기 전에 노드마다 새로 만들어야 한다.
 
 ## 검증 명령
 
@@ -286,7 +286,7 @@ cephadm shell -- ceph orch ps   # 데몬(mon/mgr/osd/rgw) 배치 현황
 
 ## 검증 이력
 
-2026-08-30 cephadm 재구성 후 전체 스택 검증 완료:
+2026-08-30 전체 스택 검증 완료:
 1. `ceph -s` HEALTH_OK, mon/mgr/osd 3개씩 정상, `rbd-pool`(size=3/min_size=2) 생성 확인
 2. RGW 3노드 배치 확인, VIP(`10.5.5.4`, `ceph.home`)로 curl 200 응답 확인
 3. krbd 매핑 실제 테스트(`/dev/rbd0` 생성) + k8s 파드에서 ceph-csi PVC 마운트·쓰기·읽기 확인
