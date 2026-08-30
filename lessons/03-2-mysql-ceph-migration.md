@@ -133,6 +133,12 @@ kubectl -n mysql get svc mysql   # EXTERNAL-IP가 10.5.5.51(mysql.k8s.home)로 �
 ### externalTrafficPolicy 기본값 때문에 호스트 기반 인증이 깨졌다(가장 심각했던 문제)
 `Cluster`(기본값) 정책에서는 트래픽을 받은 노드와 파드가 있는 노드가 다르면 kube-proxy가 SNAT(요청의 출발지 IP를 바꿔치기하는 것)을 한다. 그러면 MySQL이 보는 클라이언트 IP가 호스트 기반 grant(`user@'10.5.5.%'`)와 안 맞는 pod-CIDR 주소로 바뀐다. 실서비스 DB 라우트가 전부 500 에러를 냈다. `externalTrafficPolicy: Local`로 바꿔서 해결했다(단일 replica라 가용성 영향 없음). **호스트 기반 MySQL 인증 + MetalLB LoadBalancer 조합에서는 `Local`이 필수다.**
 
+### `ALTER USER` 도중 root의 `auth_socket` 인증이 갑자기 막혔다(원인 미상)
+애플리케이션 계정 비밀번호를 `ALTER USER`로 바꾸던 중, 그 계정과 무관한 `root@localhost`의 로컬 소켓 접속이 전부 거부되기 시작했다 — 서버 로그에 `The plugin 'auth_socket' used to authenticate user 'root'@'localhost' is not loaded. Nobody can currently login using this account.`가 찍혔다. 파드는 재시작된 적이 없었고(`RESTARTS: 0`), 플러그인이 런타임 중 스스로 언로드될 이유가 정상적으로는 없다 — 재현 조건을 못 찾았다. `kubectl -n mysql rollout restart deployment mysql`로 파드를 정상 재기동하니 auth_socket이 다시 정상 로드됐고, 그 뒤 `ALTER USER`도 문제없이 적용됐다. 다시 발생하면 `mysql.plugin` 테이블(등록된 플러그인 목록) 상태부터 확인할 것.
+
+### mysqld 재시작 직후 InnoDB 통계가 리셋돼 옵티마이저가 완전히 잘못된 실행계획을 고른다
+위 재시작 직후, 평소 0.1초 내로 끝나던 여러 LEFT JOIN + 파생 테이블 쿼리가 90~150초까지 걸렸다. `EXPLAIN`을 보니 실제로 수십만 행인 테이블들을 옵티마이저가 전부 "1행짜리"로 추정하고 있었다 — 재시작 직후 InnoDB가 아직 페이지를 충분히 샘플링하지 못해 통계가 비정상적으로 낮게 잡힌 상태였다. `ANALYZE TABLE <테이블들>;`로 통계를 강제로 재계산하니 같은 쿼리가 즉시 0.03~0.14초로 돌아왔다. **mysqld를 재시작한 뒤에는(원인이 뭐든) 주요 테이블에 `ANALYZE TABLE`을 습관적으로 돌려두는 게 안전하다** — 이미 시작된 세션의 커넥션 풀에 남아있는 이전 실행계획은 그 연결이 새로 맺어지기 전까지 안 바뀐다는 점도 주의(연결 풀을 쓰는 애플리케이션이면 재기동까지 해줘야 확실하다).
+
 ## 검증 명령
 
 ```bash

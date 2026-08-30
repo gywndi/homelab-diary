@@ -172,6 +172,19 @@ kubectl -n internal-dns rollout status deployment internal-dns --timeout=60s
 ### MetalLB Service에 `metallb.io/loadBalancerIPs` annotation이 박혀 있으면 IPAddressPool만 바꿔도 소용없다
 IPAddressPool의 주소 범위를 바꿔도, Service에 특정 IP를 못 박은 annotation이 남아있으면 MetalLB가 그 IP를 계속 요청하다가 `AllocationFailed`로 실패한다(`kubectl describe svc`의 Events에 표시됨). annotation도 같이 새 IP로 갱신해야 한다.
 
+### 클라이언트에 보조 DNS가 설정돼 있으면 `.home` 조회가 간헐적으로 실패한다
+CoreDNS의 `hosts` 플러그인이 답하는 응답에는 **RA(Recursion Available) 플래그가 안 켜져 있다** — `dig`로 비교하면 바로 보인다:
+```
+mysql.k8s.home 질의(hosts 플러그인이 직접 답함): flags: qr aa rd    <- ra 없음
+google.com 질의(forward 플러그인이 재귀 조회함):    flags: qr rd ra <- ra 있음
+```
+같은 서버인데 어떤 도메인이냐에 따라 RA 여부가 달라지는 셈이다. macOS의 리졸버(mDNSResponder)는 이 불일치를 "이 서버는 못 미덥다"로 해석해서, 클라이언트에 1차(`10.5.5.2`)·2차(예: ISP DNS) DNS가 같이 설정돼 있으면 가끔 2차로 넘어간다 — 2차 DNS는 당연히 `.home`을 모르니 `NXDOMAIN`. 매번 재현되는 게 아니라 간헐적이라 원인 찾기가 까다롭다(dig로 서버를 명시해서 질의하면 항상 정상 응답하므로 "서버는 멀쩡한데 가끔만 실패"로 보인다).
+
+해결: 클라이언트의 2차 DNS를 없애고 `10.5.5.2` 하나만 남긴다. `internal-dns`는 이미 replica 2개로 자체 이중화돼 있어서(위 "설계 결정" 참고) 보조 DNS 없이도 죽지 않고, 일반 인터넷 도메인은 `forward` 규칙으로 계속 정상 해석된다. macOS라면:
+```bash
+networksetup -setdnsservers "Ethernet" 10.5.5.2
+```
+
 ## VIP 이력
 
 CoreDNS의 VIP는 여러 번 옮겨졌다 — `10.5.5.11` → `.53`(애플리케이션 대역, 임시) → `.4`(옛 MySQL 자리) → **`.2`**(옛 ingress 자리, 최종). 최종적으로 인프라 대역(`.20` 이하)에 정착했다. 애플리케이션 VIP(ingress `.50`, MySQL `.51`)는 `.50~.99` 대역으로 옮겨갔다. 대역 정책은 [내부망 IP 정책은 비공개 문서에만 기록](../internal/ip-inventory.md) 참고(이 저장소 밖, gitignore 대상).
