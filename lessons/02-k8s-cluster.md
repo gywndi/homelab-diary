@@ -146,7 +146,7 @@ EOF
 
 sudo systemctl restart keepalived
 ```
-`<VRRP 인증암호>`는 `openssl rand -hex 4`(8자 제한) 등으로 한 번 생성해서 안전하게 기록해두고, 이 VIP에 나중에 합류할 모든 노드에 동일하게 써야 한다. `virtual_router_id`는 51(MySQL VIP, [`03-mysql-ha.md`](03-mysql-ha.md) 참고)과 겹치지 않게 52를 썼다 — 같은 keepalived.conf 안에 서로 다른 용도의 VRRP 인스턴스를 여러 개 둘 수 있다.
+`<VRRP 인증암호>`는 `openssl rand -hex 4`(8자 제한) 등으로 한 번 생성해서 안전하게 기록해두고, 이 VIP에 나중에 합류할 모든 노드에 동일하게 써야 한다. `virtual_router_id`는 51(MySQL VIP, [`03-1-mysql-ha.md`](03-1-mysql-ha.md) 참고)과 겹치지 않게 52를 썼다 — 같은 keepalived.conf 안에 서로 다른 용도의 VRRP 인스턴스를 여러 개 둘 수 있다.
 
 ### 컨트롤플레인 마무리 (CNI + join 명령)
 - 설명: VIP가 뜬 뒤에 CNI를 설치하고 워커 join 명령을 만든다 (chan08 전용). 이 단계부터는 kubectl이 VIP(10.5.5.3)를 통해 동작한다.

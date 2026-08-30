@@ -14,7 +14,7 @@
    - 문서 [바로가기](lessons/02-k8s-cluster.md) · 스크립트 [바로가기](scripts/02-k8s-cluster/)
 3. MySQL active/standby
    - semi-sync + keepalived VIP
-   - 문서 [바로가기](lessons/03-mysql-ha.md) · 스크립트 [바로가기](scripts/03-mysql-ha/)
+   - 문서 [바로가기](lessons/03-1-mysql-ha.md) · 스크립트 [바로가기](scripts/03-mysql-ha/)
    - 이후 Ceph RBD 기반 단일 인스턴스로 전환: 문서 [바로가기](lessons/03-2-mysql-ceph-migration.md)
 4. KVM 하이퍼바이저 인프라
    - 문서 [바로가기](lessons/04-kvm.md) · 스크립트 [바로가기](scripts/04-kvm/)
