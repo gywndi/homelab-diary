@@ -29,7 +29,7 @@
    - 문서 [바로가기](lessons/07-1-ceph-storage.md) · 벤치마크 [바로가기](lessons/07-2-ceph-storage-bmt.md) · 스크립트 [바로가기](scripts/07-ceph-storage/)
 8. StarRocks 분석 엔진 (FE/CN, shared-data)
    - Ceph RGW를 오브젝트 스토리지로 쓰는 shared-data 클러스터 + 비교용 shared-nothing 클러스터
-   - 문서 [바로가기](lessons/08-1-starrocks-analytics.md) · 벤치마크 [바로가기](lessons/08-2-starrocks-analytics-bmt.md) · 아카이브 적합성 [바로가기](lessons/08-3-starrocks-archive-fitness.md) · 스크립트 [바로가기](scripts/08-starrocks/)
+   - 문서 [바로가기](lessons/08-1-starrocks-analytics.md) · 벤치마크 [바로가기](lessons/08-2-starrocks-analytics-bmt.md) · 아카이브 적합성 [바로가기](lessons/08-3-starrocks-archive-fitness.md) · 운영 명령 [바로가기](lessons/08-4-starrocks-ops.md) · 스크립트 [바로가기](scripts/08-starrocks/)
 9. 내부 도메인 DNS (CoreDNS)
    - LAN·k8s 파드 양쪽에서 `k8s.home`/`ceph.home` 같은 이름으로 서비스 VIP 접속
    - 문서 [바로가기](lessons/09-internal-dns.md)
