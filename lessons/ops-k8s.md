@@ -1,6 +1,6 @@
 # k8s 운영 명령 모음
 
-[`02-k8s-cluster.md`](02-k8s-cluster.md)/[`05-llm-gpu-node.md`](05-llm-gpu-node.md)로 구축한 3노드(chan08/chan09/llm001, 전부 컨트롤플레인+워커) 클러스터를 평소에 들여다보고 조작할 때 쓰는 명령들. 구축 절차가 아니라 "상태를 확인하고, 뭔가 이상할 때 원인을 좁히는" 용도. 애플리케이션별 운영은 각자 문서 참고 — [ingress](04-2-ingress-ops.md), [StarRocks](08-4-starrocks-ops.md), [Ceph](ops-ceph.md). kubeconfig는 chan08의 `~/.kube/config`(접속 주소 `https://k8s.home:6443`, VIP `10.5.5.3`). 아래 명령들의 systemctl/UFW/네트워크 기초는 [리눅스 기본 상식](ops-linux-basics.md) 참고.
+[`02-k8s-cluster.md`](02-k8s-cluster.md)/[`05-llm-gpu-node.md`](05-llm-gpu-node.md)로 구축한 3노드(chan08/chan09/llm001, 전부 컨트롤플레인+워커) 클러스터를 평소에 들여다보고 조작할 때 쓰는 명령들. 구축 절차가 아니라 "상태를 확인하고, 뭔가 이상할 때 원인을 좁히는" 용도. 애플리케이션별 운영은 각자 문서 참고 — [ingress](04-2-ingress-ops.md), [StarRocks](08-4-starrocks-ops.md), [Ceph](ops-ceph.md). kubeconfig는 3노드 전부 `~/.kube/config`(`/etc/kubernetes/admin.conf`로의 심볼릭 링크, 접속 주소 `https://k8s.home:6443`, VIP `10.5.5.3`). 아래 명령들의 systemctl/UFW/네트워크 기초는 [리눅스 기본 상식](ops-linux-basics.md) 참고.
 
 ## 클러스터/노드 상태
 

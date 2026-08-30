@@ -34,5 +34,15 @@ fi
 JOIN_CMD="$(cat "$JOIN_SCRIPT")"
 eval "$JOIN_CMD --control-plane --apiserver-advertise-address=${SELF_IP}"
 
+echo "== 이 노드의 chan 계정용 kubeconfig도 설정 (join만으로는 안 만들어짐) =="
+TARGET_USER="${SUDO_USER:-$(whoami)}"
+TARGET_HOME="$(getent passwd "$TARGET_USER" | cut -d: -f6)"
+mkdir -p "$TARGET_HOME/.kube"
+chgrp "$TARGET_USER" /etc/kubernetes/admin.conf
+chmod 640 /etc/kubernetes/admin.conf
+ln -sf /etc/kubernetes/admin.conf "$TARGET_HOME/.kube/config"
+chown -h "$TARGET_USER:$TARGET_USER" "$TARGET_HOME/.kube/config"
+chown "$TARGET_USER:$TARGET_USER" "$TARGET_HOME/.kube"
+
 echo "완료: 컨트롤플레인으로 join. 기존 컨트롤플레인에서 'kubectl uncordon <이 노드>'와"
 echo "etcd 멤버 수 확인('kubectl -n kube-system exec etcd-<기존노드> -- etcdctl member list ...') 필요"

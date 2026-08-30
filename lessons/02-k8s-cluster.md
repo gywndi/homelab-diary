@@ -93,11 +93,15 @@ sudo kubeadm init \
 # kubectl 설정 디렉터리 생성
 mkdir -p ~/.kube
 
-# 초기화 시 생성된 관리자 인증서를 일반 계정이 쓸 위치로 복사 (server 주소는 위 VIP로 자동 설정됨)
-sudo cp -i /etc/kubernetes/admin.conf ~/.kube/config
+# admin.conf는 기본적으로 root만 읽을 수 있다 — chan 그룹에만 읽기 권한을 열어준다
+sudo chgrp chan /etc/kubernetes/admin.conf
+sudo chmod 640 /etc/kubernetes/admin.conf
 
-# sudo 없이 kubectl을 쓸 수 있도록 소유자 변경 (설정 파일 + 디렉터리 모두)
-sudo chown chan:chan ~/.kube/config ~/.kube
+# 복사 대신 심볼릭 링크로 건다 (server 주소는 위 VIP로 자동 설정됨) — admin.conf가
+# 나중에 다시 바뀌어도(인증서 재발급 등) 재복사할 필요 없이 자동으로 따라간다
+ln -sf /etc/kubernetes/admin.conf ~/.kube/config
+sudo chown -h chan:chan ~/.kube/config
+sudo chown chan:chan ~/.kube
 ```
 `--upload-certs`는 컨트롤플레인 인증서를 클러스터 안에(암호화해서) 미리 올려두는 옵션이다. 나중에 다른 노드를 컨트롤플레인으로 추가할 때, 그 인증서를 받아올 임시 열쇠(`--certificate-key`)를 매번 새로 발급받아 쓴다 — 이 열쇠는 2시간짜리라 지금 당장 안 쓰면 그냥 버려지고, 필요할 때 `kubeadm init phase upload-certs --upload-certs`로 다시 만들면 된다.
 
@@ -232,7 +236,6 @@ mv /tmp/kube-apiserver.yaml.tmp /etc/kubernetes/manifests/kube-apiserver.yaml
 
 # 4) admin.conf(사람용 kubeconfig)의 server 주소를 VIP로 변경
 sed -i "s#https://<이 노드 IP>:6443#https://<VIP>:6443#" /etc/kubernetes/admin.conf
-cp -f /etc/kubernetes/admin.conf ~/.kube/config
 
 # 5) kube-public/cluster-info도 VIP로 갱신 (안 하면 join 명령이 계속 옛 고정 IP를 가리킴)
 kubectl -n kube-public get cm cluster-info -o jsonpath='{.data.kubeconfig}' > /tmp/cluster-info-kubeconfig.yaml

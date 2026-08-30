@@ -31,9 +31,15 @@ kubeadm init \
   | tee /root/kubeadm-init.log
 
 echo "== ${TARGET_USER} 계정용 kubeconfig 설정 (server 주소는 위 VIP로 자동 설정됨) =="
+# 복사가 아니라 심볼릭 링크로 건다 — admin.conf가 나중에 다시 바뀌어도
+# (인증서 재발급으로 SAN이 늘어나는 등) 따로 재복사할 필요가 없다.
+# admin.conf는 기본적으로 root만 읽을 수 있어서, TARGET_USER 그룹에만 읽기를 열어준다.
 mkdir -p "$TARGET_HOME/.kube"
-cp -i /etc/kubernetes/admin.conf "$TARGET_HOME/.kube/config"
-chown "$TARGET_USER:$TARGET_USER" "$TARGET_HOME/.kube/config" "$TARGET_HOME/.kube"
+chgrp "$TARGET_USER" /etc/kubernetes/admin.conf
+chmod 640 /etc/kubernetes/admin.conf
+ln -sf /etc/kubernetes/admin.conf "$TARGET_HOME/.kube/config"
+chown -h "$TARGET_USER:$TARGET_USER" "$TARGET_HOME/.kube/config"
+chown "$TARGET_USER:$TARGET_USER" "$TARGET_HOME/.kube"
 
 echo "완료: 컨트롤플레인 초기화. 다음은 05-setup-apiserver-vip-keepalived.sh로 VIP를 띄울 것"
 echo "(그 전까지는 kubectl이 ${VIP}에 붙지 못해 정상 동작하지 않는다 - 의도된 상태)"

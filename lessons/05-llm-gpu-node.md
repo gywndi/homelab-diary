@@ -145,6 +145,16 @@ kubectl uncordon <새 노드>
 ```
 join 후 kubelet/controller-manager/scheduler의 kubeconfig는 kubeadm이 자동으로 **이 노드 자신의 IP**를 가리키게 생성한다 (VIP가 아님) — 로컬 apiserver가 가장 빠르고, 이 노드가 살아있으면 자기 자신의 apiserver도 살아있다고 보기 때문에 의도된 동작이다. `admin.conf`(사람이 kubectl 붙는 용도)만 VIP를 가리키도록 생성된다.
 
+join 자체는 이 노드의 로그인 계정용 `~/.kube/config`를 만들어주지 않는다 — 스크립트가 [`02-k8s-cluster.md`](02-k8s-cluster.md)와 동일한 방식으로 직접 만든다:
+```bash
+mkdir -p "$TARGET_HOME/.kube"
+chgrp "$TARGET_USER" /etc/kubernetes/admin.conf
+chmod 640 /etc/kubernetes/admin.conf
+ln -sf /etc/kubernetes/admin.conf "$TARGET_HOME/.kube/config"
+chown -h "$TARGET_USER:$TARGET_USER" "$TARGET_HOME/.kube/config"
+chown "$TARGET_USER:$TARGET_USER" "$TARGET_HOME/.kube"
+```
+
 join이 끝나 이 노드의 로컬 apiserver가 살아나면, VIP도 이 노드와 나눠 갖게 한다 — 새 스크립트가 아니라 [`02-k8s-cluster.md`의 keepalived 스크립트](02-k8s-cluster.md#api-서버-vip-keepalived-구성)를 이 노드에서 BACKUP으로 재실행하는 것으로 충분하다:
 ```bash
 # chan09: priority 140, llm001: priority 130 (기존 chan08=150보다 낮게)
