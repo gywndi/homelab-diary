@@ -1,7 +1,7 @@
 #!/bin/bash
 # End-to-end 검증: DB/테이블 생성 + INSERT + SELECT로 RGW까지 실제 데이터가
 # 쓰이는지 확인한다. 첫 테이블 생성은 콜드 스타트로 60~300초 걸릴 수 있다
-# (README.md 참고) — 조급하게 타임아웃 낮추지 말 것.
+# (lessons/08-1-starrocks-analytics.md "알려진 이슈" 참고) — 조급하게 타임아웃 낮추지 말 것.
 #
 # 사용법: ./03-verify.sh
 
@@ -17,4 +17,4 @@ SELECT * FROM t1 ORDER BY id;
 '
 
 echo "완료: bmt_test.t1 테이블 생성/조회 성공. RGW 버킷 오브젝트 수 증가 여부는 아래로 확인 가능:"
-echo "  kubectl -n rook-ceph exec deploy/rook-ceph-tools -- radosgw-admin bucket stats --bucket=starrocks-storage --rgw-realm=starrocks-store"
+echo "  sudo cephadm shell -- radosgw-admin bucket stats --bucket=starrocks-storage  (chan08에서)"

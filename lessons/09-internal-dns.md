@@ -31,6 +31,7 @@ flowchart LR
 |---|---|---|
 | `k8s.home` | `10.5.5.50` | ingress VIP — Host 헤더로 여러 웹 서비스 라우팅 |
 | `mysql.k8s.home` | `10.5.5.51` | MySQL VIP — raw TCP라 포트(3306)로 직접 접속 |
+| `ceph.home` | `10.5.5.4` | Ceph RGW VIP — k8s와 무관하게 독립적으로 떠 있는 인프라라 `k8s.home` 하위가 아니라 최상위 도메인으로 등록 |
 
 새 이름을 추가하려면 `internal-dns-corefile` ConfigMap의 `hosts` 블록에 `<IP> <이름>` 한 줄을 추가하면 된다.
 
@@ -51,6 +52,7 @@ data:
         hosts /etc/coredns/customhosts {
           10.5.5.50 k8s.home
           10.5.5.51 mysql.k8s.home
+          10.5.5.4 ceph.home
           fallthrough
         }
         forward . 10.5.5.1

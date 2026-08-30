@@ -15,6 +15,7 @@
 3. MySQL active/standby
    - semi-sync + keepalived VIP
    - 문서 [바로가기](lessons/03-mysql-ha.md) · 스크립트 [바로가기](scripts/03-mysql-ha/)
+   - 이후 Ceph RBD 기반 단일 인스턴스로 전환: 문서 [바로가기](lessons/03-2-mysql-ceph-migration.md)
 4. KVM 하이퍼바이저 인프라
    - 문서 [바로가기](lessons/04-kvm.md) · 스크립트 [바로가기](scripts/04-kvm/)
 5. Ingress + 인증서 자동화
@@ -23,5 +24,14 @@
 6. LLM GPU 노드 추가 (3노드, 컨트롤플레인 HA)
    - GPU 워커 편입 + etcd 쿼럼 3 구성
    - 문서 [바로가기](lessons/06-llm-gpu-node.md) · 스크립트 [바로가기](scripts/06-llm-gpu-node/)
+7. Ceph 스토리지 (RBD/RGW)
+   - 3노드 재구성, cephadm으로 베어메탈 배포(k8s와 무관하게 독립 운영)
+   - 문서 [바로가기](lessons/07-1-ceph-storage.md) · 벤치마크 [바로가기](lessons/07-2-ceph-storage-bmt.md) · 스크립트 [바로가기](scripts/07-ceph-storage/)
+8. StarRocks 분석 엔진 (FE/CN, shared-data)
+   - Ceph RGW를 오브젝트 스토리지로 쓰는 shared-data 클러스터 + 비교용 shared-nothing 클러스터
+   - 문서 [바로가기](lessons/08-1-starrocks-analytics.md) · 벤치마크 [바로가기](lessons/08-2-starrocks-analytics-bmt.md) · 아카이브 적합성 [바로가기](lessons/08-3-starrocks-archive-fitness.md) · 스크립트 [바로가기](scripts/08-starrocks/)
+9. 내부 도메인 DNS (CoreDNS)
+   - LAN·k8s 파드 양쪽에서 `k8s.home`/`ceph.home` 같은 이름으로 서비스 VIP 접속
+   - 문서 [바로가기](lessons/09-internal-dns.md)
 
 `lessons/`에 목적, 스크립트별 실행 명령, 설계 결정, 알려진 이슈가 정리되어 있다. `scripts/`에는 실행 스크립트 파일만 있다. `concepts/`에는 [Kubernetes 개념 정리](concepts/kubernetes.md)처럼 배경 개념 설명을 모아둔다.

@@ -3,6 +3,8 @@
 Stage 1(chan08/chan09 keepalived 페일오버)을 대체했다. 이제 단일 mysqld가 k8s Deployment + Ceph RBD PVC 위에서 돈다. 스토리지 배경은 [Ceph 스토리지](07-1-ceph-storage.md) 참고.
 
 > VIP는 이 문서에 적힌 `10.5.5.4`에서 2026-08-29에 옮겨졌다(애플리케이션 VIP 대역 정책 적용). 지금은 IP를 직접 쓰지 않고 **`mysql.k8s.home`** 도메인으로 접속한다 — [내부 DNS](09-internal-dns.md) 참고. VIP가 다시 바뀌어도 이 도메인만 갱신하면 된다.
+>
+> 2026-08-30에 스토리지 백엔드가 Rook에서 cephadm(베어메탈)으로 바뀌었다 — 자세한 배경은 [Ceph 스토리지](07-1-ceph-storage.md) 참고. `StorageClass`만 `rook-ceph-block`에서 `ceph-csi-rbd`로 바뀌었고, Deployment/PVC 구조와 애플리케이션 접속 방식(`mysql.k8s.home`)은 그대로다.
 
 ## 목적
 
@@ -66,7 +68,7 @@ sed -i '\|[[:space:]]/data[[:space:]]|d' /etc/fstab
 ```
 
 ### MySQL k8s 리소스(네임스페이스/설정/PVC) 생성
-- 설명: RBD PVC(30Gi, `rook-ceph-block`) 기반으로 MySQL을 재배포하기 위한 네임스페이스/ConfigMap/PVC를 만든다.
+- 설명: RBD PVC(30Gi, `ceph-csi-rbd`) 기반으로 MySQL을 재배포하기 위한 네임스페이스/ConfigMap/PVC를 만든다.
 - 스크립트: [`08-mysql-configmap-pvc.yaml`](../scripts/07-ceph-storage/08-mysql-configmap-pvc.yaml)
 ```yaml
 apiVersion: v1
@@ -86,7 +88,7 @@ kind: PersistentVolumeClaim
 metadata: {name: mysql-data, namespace: mysql}
 spec:
   accessModes: [ReadWriteOnce]
-  storageClassName: rook-ceph-block
+  storageClassName: ceph-csi-rbd
   resources: {requests: {storage: 30Gi}}
 ```
 

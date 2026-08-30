@@ -43,7 +43,7 @@ enable_load_volume_from_conf = true
 tablet_create_timeout_second = 60
 aws_s3_path = starrocks-storage
 aws_s3_region = default
-aws_s3_endpoint = http://rgw-starrocks-store-lb.rook-ceph.svc:7480
+aws_s3_endpoint = http://10.5.5.4:7480
 aws_s3_use_aws_sdk_default_behavior = false
 aws_s3_use_instance_profile = false
 aws_s3_access_key = ${ACCESS_KEY}
@@ -73,7 +73,7 @@ metadata:
 spec:
   accessModes:
     - ReadWriteOnce
-  storageClassName: rook-ceph-block
+  storageClassName: ceph-csi-rbd
   resources:
     requests:
       storage: 10Gi
