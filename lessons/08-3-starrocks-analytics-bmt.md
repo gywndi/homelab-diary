@@ -160,4 +160,4 @@ kubectl -n starrocks patch deployment fe --type=json \
 
 ---
 
-[← 이전: StarRocks 분석 엔진](08-1-starrocks-analytics.md) · [다음: StarRocks 아카이브 적합성 →](08-3-starrocks-archive-fitness.md)
+[← 이전: StarRocks 베어메탈 구축](08-2-starrocks-baremetal.md) · [다음: StarRocks 아카이브 적합성 →](08-4-starrocks-archive-fitness.md)

@@ -254,4 +254,4 @@ kubectl get nodes -o json | jq '.items[] | {name:.metadata.name, taints:.spec.ta
 
 ---
 
-[← 이전: Ingress 운영](04-2-ingress-ops.md) · [다음: KVM 인프라 →](06-1-kvm.md)
+[← 이전: Ingress 운영](04-2-ingress-ops.md) · [다음: KVM 인프라 →](06-kvm.md)

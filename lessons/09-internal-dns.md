@@ -207,4 +207,4 @@ getent hosts k8s.home
 
 ---
 
-[← 이전: StarRocks 운영](08-4-starrocks-ops.md) · [다음: NAS 연동 →](10-nas-storage.md)
+[← 이전: StarRocks 운영](08-5-starrocks-ops.md) · [다음: NAS 연동 →](10-nas-storage.md)

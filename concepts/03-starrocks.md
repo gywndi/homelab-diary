@@ -84,7 +84,7 @@ ReplayedJournalId: 3544        -- 리더(3546)와 거의 일치, 복제 지연 �
 
 클라이언트는 리더/팔로워/옵저버 아무 FE에나 붙어서 읽기 쿼리를 넣을 수 있다(쓰기만 리더로 전달됨). 그래서 실무에서는 여러 FE 앞에 로드밸런서(HAProxy/ProxySQL 등)를 두고 커넥션을 분산시킨다.
 
-다만 우리 자체 벤치마크([08-2](../lessons/08-2-starrocks-analytics-bmt.md))에서는 FE를 늘려도 동시성이 개선되지 않았다 — 그 워크로드의 진짜 병목이 FE 코디네이션이 아니라 CN이 매 쿼리마다 오브젝트 스토리지(RGW)로 왕복하는 네트워크 비용이었기 때문이다. FE 확장(Follower든 Observer든)은 "동시 커넥션/쿼리 계획 수립 자체가 병목일 때"만 효과가 있는 레버라는 뜻 — 병목이 어디인지 먼저 확인하지 않고 FE부터 늘리면 헛수고가 될 수 있다.
+다만 우리 자체 벤치마크([08-3](../lessons/08-3-starrocks-analytics-bmt.md))에서는 FE를 늘려도 동시성이 개선되지 않았다 — 그 워크로드의 진짜 병목이 FE 코디네이션이 아니라 CN이 매 쿼리마다 오브젝트 스토리지(RGW)로 왕복하는 네트워크 비용이었기 때문이다. FE 확장(Follower든 Observer든)은 "동시 커넥션/쿼리 계획 수립 자체가 병목일 때"만 효과가 있는 레버라는 뜻 — 병목이 어디인지 먼저 확인하지 않고 FE부터 늘리면 헛수고가 될 수 있다.
 
 ## shared-nothing vs shared-data — 데이터를 어디에 저장하는가
 
@@ -97,7 +97,7 @@ ReplayedJournalId: 3544        -- 리더(3546)와 거의 일치, 복제 지연 �
 | 첫 쿼리 지연 | 없음(로컬 디스크 바로 읽음) | 있음(Data Cache에 없으면 오브젝트 스토리지에서 가져와야 함) |
 | 우리 용도 | 성능 비교 기준선(`starrocks-sn` 클러스터) | 실제 운영(`starrocks` 클러스터, RGW 기반) |
 
-CN은 로컬 영구 저장이 없다는 점만 빼면 실행 엔진은 BE와 같다. 쿼리에 필요한 데이터를 오브젝트 스토리지에서 읽어와 Data Cache(로컬 디스크 캐시)에 저장해두고, 다음 쿼리부터는 캐시를 먼저 본다 — 그래서 shared-data는 "첫 쿼리는 느리고 그 이후는 빠르다"는 특성이 있다. 실측 결과는 [shared-nothing vs shared-data 벤치마크](../lessons/08-2-starrocks-analytics-bmt.md) 참고.
+CN은 로컬 영구 저장이 없다는 점만 빼면 실행 엔진은 BE와 같다. 쿼리에 필요한 데이터를 오브젝트 스토리지에서 읽어와 Data Cache(로컬 디스크 캐시)에 저장해두고, 다음 쿼리부터는 캐시를 먼저 본다 — 그래서 shared-data는 "첫 쿼리는 느리고 그 이후는 빠르다"는 특성이 있다. 실측 결과는 [shared-nothing vs shared-data 벤치마크](../lessons/08-3-starrocks-analytics-bmt.md) 참고.
 
 ```bash
 mysql -h fe.starrocks.svc.cluster.local -P 9030 -u root -e "SHOW COMPUTE NODES\G"
@@ -141,7 +141,7 @@ flowchart LR
     EXEC --> MERGE["결과 취합 후 클라이언트에 반환"]
 ```
 
-CBO(Cost-Based Optimizer)가 통계(테이블 크기, 카디널리티 등)를 보고 조인 순서·조인 방식(broadcast vs shuffle) 등을 정한다. 이 선택이 실제 성능에 크게 영향을 준다 — 예를 들어 작은 차원(dimension) 테이블은 broadcast join으로, 큰 테이블끼리는 shuffle join으로 처리하는 식이다. 실측 사례는 [CN 개수 확장 효과](../lessons/08-2-starrocks-analytics-bmt.md#cn-개수-확장-효과-쿼리-무게에-따라-다르다) 참고.
+CBO(Cost-Based Optimizer)가 통계(테이블 크기, 카디널리티 등)를 보고 조인 순서·조인 방식(broadcast vs shuffle) 등을 정한다. 이 선택이 실제 성능에 크게 영향을 준다 — 예를 들어 작은 차원(dimension) 테이블은 broadcast join으로, 큰 테이블끼리는 shuffle join으로 처리하는 식이다. 실측 사례는 [CN 개수 확장 효과](../lessons/08-3-starrocks-analytics-bmt.md#cn-개수-확장-효과-쿼리-무게에-따라-다르다) 참고.
 
 ## 로컬에서 가볍게 띄워보기 — Docker Compose
 

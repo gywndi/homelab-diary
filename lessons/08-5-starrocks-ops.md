@@ -40,7 +40,7 @@ PROPERTIES("replication_num"="2");
 
 ## 데이터 넣기
 
-작은/중간 규모 테스트 데이터는 `generate_series`로 서버 사이드에서 즉석 생성한다. 편리하지만 CPU 비용이 붙는다는 게 함정이다 — [`08-2` 고카디널리티 재검증](08-2-starrocks-analytics-bmt.md) 참고.
+작은/중간 규모 테스트 데이터는 `generate_series`로 서버 사이드에서 즉석 생성한다. 편리하지만 CPU 비용이 붙는다는 게 함정이다 — [`08-2` 고카디널리티 재검증](08-3-starrocks-analytics-bmt.md) 참고.
 
 ```sql
 INSERT INTO events
@@ -163,4 +163,4 @@ FE가 여러 대(Follower/Observer 포함)면 한 번에 하나씩만 재시작�
 
 ---
 
-[← 이전: StarRocks 아카이브 적합성](08-3-starrocks-archive-fitness.md) · [다음: 내부 도메인 DNS →](09-internal-dns.md)
+[← 이전: StarRocks 아카이브 적합성](08-4-starrocks-archive-fitness.md) · [다음: 내부 도메인 DNS →](09-internal-dns.md)

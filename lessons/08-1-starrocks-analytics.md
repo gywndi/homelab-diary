@@ -27,7 +27,7 @@ flowchart LR
     COORD --> CLIENT
 ```
 
-FE가 곧 Coordinator다. 동시 쿼리가 몰리면 CN을 아무리 늘려도 FE 하나가 모든 쿼리의 플래닝/조정을 떠맡는다(동시성 병목 실측은 [BMT](08-2-starrocks-analytics-bmt.md) 참고).
+FE가 곧 Coordinator다. 동시 쿼리가 몰리면 CN을 아무리 늘려도 FE 하나가 모든 쿼리의 플래닝/조정을 떠맡는다(동시성 병목 실측은 [BMT](08-3-starrocks-analytics-bmt.md) 참고).
 
 ### 데이터가 저장되는 구조
 
@@ -146,4 +146,4 @@ SHOW CREATE TABLE t\G     -- storage_volume 있으면 cloud-native, replicated_s
 
 ---
 
-[← 이전: Ceph 벤치마크](07-2-ceph-storage-bmt.md) · [다음: StarRocks 벤치마크 →](08-2-starrocks-analytics-bmt.md)
+[← 이전: Ceph 벤치마크](07-2-ceph-storage-bmt.md) · [다음: StarRocks 베어메탈 구축 →](08-2-starrocks-baremetal.md)
