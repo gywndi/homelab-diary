@@ -77,6 +77,27 @@ flowchart LR
 
 ## 스크립트 목록 (이름 순)
 
+### 방화벽 개방
+- 설명: mon/osd/mgr/RGW 포트를 3노드 모두에 연다. 물리 LAN(`10.5.5.0/24`)에서만 허용한다.
+- 스크립트: [`00-open-ceph-firewall-ports.sh`](../scripts/07-ceph-storage/00-open-ceph-firewall-ports.sh)
+```bash
+# mon msgr v1/v2
+sudo ufw allow from 10.5.5.0/24 to any port 6789 proto tcp comment 'Ceph mon msgr v1'
+sudo ufw allow from 10.5.5.0/24 to any port 3300 proto tcp comment 'Ceph mon msgr v2'
+
+# osd/mgr/mds 포트 범위
+sudo ufw allow from 10.5.5.0/24 to any port 6800:7300 proto tcp comment 'Ceph osd/mgr/mds'
+
+# mgr 대시보드(ssl)
+sudo ufw allow from 10.5.5.0/24 to any port 8443 proto tcp comment 'Ceph mgr dashboard'
+
+# RGW(S3)
+sudo ufw allow from 10.5.5.0/24 to any port 7480 proto tcp comment 'Ceph RGW S3'
+
+sudo ufw reload
+```
+3노드(chan08/chan09/llm001) 모두에서 동일하게 실행한다.
+
 ### 클러스터 부트스트랩(mon+mgr)
 - 설명: cephadm 설치 후 클러스터를 만든다. 부트스트랩 직후 레거시 cephx 키(krbd 호환)를 허용하도록 설정한다 — 이유는 아래 "알려진 이슈" 참고. chan08(관리 노드) 1회만 실행한다.
 - 스크립트: [`14-cephadm-bootstrap.sh`](../scripts/07-ceph-storage/14-cephadm-bootstrap.sh)

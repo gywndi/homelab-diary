@@ -1,18 +1,11 @@
 #!/bin/bash
-# "진짜" shared-nothing(starrocks-sn 네임스페이스, run_mode 기본값, 로컬 XFS에
-# 실제 저장) vs shared-data(starrocks 네임스페이스, run_mode=shared_data, RGW에
-# 실제 저장) STREAM LOAD 순수 쓰기 I/O 비교.
-#
-# 배경: scripts/08-starrocks/08-stream-load-benchmark.sh(및 이전 CRUD/MPP 벤치마크
-# 전체)는 "BE로 라우팅되면 로컬 저장"이라고 가정했는데, 실제로는 run_mode=shared_data인
-# FE에서는 replication_num을 지정해도 모든 테이블이 cloud-native(RGW 기반)로 생성된다는
-# 게 뒤늦게 밝혀졌다(SHOW CREATE TABLE의 storage_volume 속성, BE 로컬 data/ 디렉토리가
-# 0바이트인 것으로 확인). 그래서 이 스크립트는 run_mode 자체가 다른 완전히 별도의 FE
-# 클러스터(starrocks-sn)를 만들어 진짜 로컬 저장과 비교한다.
+# shared-nothing(starrocks-sn 네임스페이스, run_mode 기본값, 로컬 XFS에 실제 저장)
+# vs shared-data(starrocks 네임스페이스, run_mode=shared_data, RGW에 실제 저장)
+# STREAM LOAD 순수 쓰기 I/O 비교.
 #
 # 사전 조건: 09-deploy-sn-fe.sh, 10-deploy-sn-be.sh(3노드) 실행 완료
 # 사용법: 대상 노드(예: chan08)에서 실행
-#   ./11-real-sn-vs-shared-data-benchmark.sh [행 수, 기본 10000000]
+#   ./11-real-sn-vs-shared-data-stream-load.sh [행 수, 기본 10000000]
 
 set -euo pipefail
 

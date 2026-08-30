@@ -19,54 +19,6 @@ Stage 1은 MySQL 자체 복제(semi-sync)로 데이터를 이중화했다. 이�
 
 ## 스크립트 목록 (이름 순)
 
-### MySQL 백업
-- 설명: `/data`를 비우기 전 chan08(source)에서 전체 백업한다. chan09(replica)는 복제를 끊고 폐기할 예정이라 별도 백업이 필요 없다.
-- 스크립트: [`05-backup-mysql.sh`](../scripts/07-ceph-storage/05-backup-mysql.sh)
-```bash
-# --single-transaction: InnoDB 테이블을 잠그지 않고 일관된 스냅샷으로 덤프
-mysqldump --all-databases --single-transaction --routines --triggers --events | gzip > all-databases.sql.gz
-
-gzip -t all-databases.sql.gz && echo "gzip 무결성 OK"
-```
-
-### MySQL datadir 임시 이전
-- 설명: chan08에서 datadir을 `/data`에서 `/home`(nvme, OS 디스크)으로 먼저 옮긴다. `/data`는 곧 Ceph OSD로 전환될 디스크다. 이렇게 하면 Ceph 구축을 기다리지 않고 `/data`를 바로 비울 수 있다. 최종적으로는 k8s RBD PVC로 한 번 더 옮긴다.
-- 스크립트: [`06-relocate-mysql-datadir.sh`](../scripts/07-ceph-storage/06-relocate-mysql-datadir.sh)
-```bash
-# AppArmor 로컬 오버라이드에 새 경로 허용 추가(Ubuntu MySQL 패키지가 datadir 경로를 화이트리스트로 제한)
-cat >> /etc/apparmor.d/local/usr.sbin.mysqld <<EOF
-/home/mysql/ r,
-/home/mysql/** rwk,
-EOF
-apparmor_parser -r /etc/apparmor.d/usr.sbin.mysqld
-
-# 데이터를 옮기기 전 mysqld 정지
-systemctl stop mysql
-
-# rsync -a로 소유권/권한 보존하며 물리 복사. 원본 /data/mysql은 삭제하지 않고 남겨둔다 — 이후 디스크 wipe 때 같이 없어진다.
-rsync -a /data/mysql/ /home/mysql/
-
-# datadir 설정을 새 경로로 변경
-sed -i "s|^datadir\s*=.*|datadir = /home/mysql|" /etc/mysql/mysql.conf.d/zz-datadir.cnf
-
-# 새 datadir로 mysqld 재기동
-systemctl start mysql
-```
-
-### 데이터 디스크 wipe
-- 설명: `/data`를 Ceph OSD용 raw 상태로 전환한다. 되돌릴 수 없는 작업이다. 데이터가 이미 다른 곳으로 이전/백업되어 있어야 한다.
-- 스크립트: [`07-wipe-data-disk.sh`](../scripts/07-ceph-storage/07-wipe-data-disk.sh)
-```bash
-# /data 마운트 해제
-umount /data
-
-# 파일시스템 시그니처 제거 (디스크 전체 단일 파티션, 양쪽 서버 모두 /dev/sda1)
-wipefs -a /dev/sda1
-
-# fstab에서 /data 마운트 항목 제거
-sed -i '\|[[:space:]]/data[[:space:]]|d' /etc/fstab
-```
-
 ### MySQL k8s 리소스(네임스페이스/설정/PVC) 생성
 - 설명: RBD PVC(30Gi, `ceph-csi-rbd`) 기반으로 MySQL을 재배포하기 위한 네임스페이스/ConfigMap/PVC를 만든다.
 - 스크립트: [`08-mysql-configmap-pvc.yaml`](../scripts/07-ceph-storage/08-mysql-configmap-pvc.yaml)
@@ -90,41 +42,6 @@ spec:
   accessModes: [ReadWriteOnce]
   storageClassName: ceph-csi-rbd
   resources: {requests: {storage: 30Gi}}
-```
-
-### MySQL 데이터를 RBD PVC로 이전
-- 설명: 기존 호스트(`/home/mysql`)의 데이터를 RBD PVC로 옮긴다. mysqld를 정지시킨다. 이 시점부터 새 파드 기동까지가 다운타임 구간이다.
-- 스크립트: [`09-mysql-migrate-data.sh`](../scripts/07-ceph-storage/09-mysql-migrate-data.sh)
-```bash
-# PVC만 마운트하는 임시 loader 파드 생성
-kubectl apply -f - <<EOF
-apiVersion: v1
-kind: Pod
-metadata: {name: mysql-data-loader, namespace: mysql}
-spec:
-  containers:
-    - name: loader
-      image: ubuntu:24.04
-      command: ["sleep", "3600"]
-      volumeMounts: [{name: data, mountPath: /var/lib/mysql}]
-  volumes:
-    - {name: data, persistentVolumeClaim: {claimName: mysql-data}}
-EOF
-
-# loader 파드가 뜰 때까지 대기
-kubectl -n mysql wait --for=condition=Ready pod/mysql-data-loader --timeout=120s
-
-# 데이터 복사 전 mysqld 정지 (다운타임 시작)
-sudo systemctl stop mysql
-
-# tar 스트림으로 데이터 복사
-tar -C /home/mysql -cf - . | kubectl exec -i -n mysql mysql-data-loader -- tar -C /var/lib/mysql -xf -
-
-# 공식 mysql 이미지 규격(999:999)으로 소유권 설정
-kubectl -n mysql exec mysql-data-loader -- chown -R 999:999 /var/lib/mysql
-
-# 임시 파드 정리
-kubectl -n mysql delete pod mysql-data-loader --wait=true
 ```
 
 ### MySQL Deployment 배포
@@ -152,23 +69,15 @@ spec:
         - {name: config, configMap: {name: mysql-config}}
 ```
 
-### MySQL VIP를 MetalLB로 컷오버
-- 설명: 기존 keepalived VIP(`10.5.5.4`)를 k8s Service(MetalLB)로 이관한다. 파드 정상 기동과 데이터 확인이 끝난 뒤에 실행한다.
-- 스크립트: [`11-mysql-vip-cutover.sh`](../scripts/07-ceph-storage/11-mysql-vip-cutover.sh)
-```bash
-# chan08에서 keepalived 중지(VIP 회수)
-ssh 10.5.5.8 'sudo systemctl stop keepalived'
+## 최초 마이그레이션 기록 (2026-08-27, 스크립트는 삭제됨)
 
-# chan09에서도 동일하게 중지
-ssh 10.5.5.9 'sudo systemctl stop keepalived'
+호스트 네이티브 MySQL(Stage 1)을 Ceph RBD로 옮긴 최초 1회성 절차다. 그 호스트 네이티브 인스턴스 자체가 이제 없어서 다시 실행할 일이 없다 — 스크립트 파일은 지웠고, 실제로 무엇을 했는지만 기록으로 남긴다.
 
-# IPAddressPool/L2Advertisement로 같은 VIP(10.5.5.4)를 MetalLB에 등록(ingress와 같은 패턴)
-
-# externalTrafficPolicy: Local이 필수다. Cluster(기본값)면 트래픽 받은 노드와 파드 노드가 다를 때
-# kube-proxy가 SNAT을 해서 클라이언트 IP가 바뀐다. host@'10.5.5.%' 기반 grant가 그 IP를 못 알아본다.
-# (단일 replica라 Local로 바꿔도 가용성엔 영향 없다.)
-kubectl -n mysql patch svc mysql -p '{"spec":{"type":"LoadBalancer","externalTrafficPolicy":"Local"}}'
-```
+1. **백업**: chan08(source)에서 `mysqldump --all-databases --single-transaction --routines --triggers --events | gzip > all-databases.sql.gz`. chan09(replica)는 복제를 끊고 폐기할 예정이라 별도 백업 없음.
+2. **datadir 임시 이전**: `/data`(곧 Ceph OSD로 전환될 디스크)를 비우려고, datadir을 `/home`(OS 디스크)으로 먼저 옮겼다. AppArmor 로컬 오버라이드에 새 경로를 허용 추가해야 했다(안 하면 mysqld가 파일 접근을 거부당함). `rsync -a`로 물리 복사 후 `datadir` 설정 변경, mysqld 재기동.
+3. **데이터 디스크 wipe**: `/data` 마운트 해제 → `wipefs -a`로 파일시스템 시그니처 제거 → fstab에서 항목 삭제. Ceph OSD가 이 디스크를 raw로 넘겨받을 수 있게 하는 되돌릴 수 없는 단계라, 앞 단계에서 데이터가 안전히 옮겨졌는지 먼저 확인했다.
+4. **RBD PVC로 데이터 이전**: PVC만 마운트하는 임시 loader 파드(`ubuntu:24.04`, `sleep 3600`)를 띄우고, mysqld를 정지한 뒤 `tar -C /home/mysql -cf - . | kubectl exec -i ... -- tar -C /var/lib/mysql -xf -`로 스트림 복사. 공식 mysql 이미지 규격(999:999)으로 소유권 맞춘 뒤 loader 파드 삭제. 이 시점부터 새 파드 기동까지가 다운타임 구간이었다.
+5. **VIP 컷오버**: 양쪽 노드에서 keepalived를 정지해 기존 VIP(`10.5.5.4`)를 회수하고, 같은 IP로 MetalLB Service(`type: LoadBalancer`)를 등록했다. `externalTrafficPolicy: Local`이 필수였다 — 아래 "알려진 이슈" 참고.
 
 ## 알려진 이슈
 

@@ -121,7 +121,7 @@ FE 배치까지 끝낸 상태에서 CN을 1개→2개→3개로 늘려가며 두
 
 ### STREAM LOAD 비교
 - 설명: shared-nothing과 shared-data 클러스터에 같은 CSV를 STREAM LOAD로 적재해 순수 쓰기 시간을 비교한다.
-- 스크립트: [`11-real-sn-vs-shared-data-benchmark.sh`](../scripts/08-starrocks/11-real-sn-vs-shared-data-benchmark.sh)
+- 스크립트: [`11-real-sn-vs-shared-data-stream-load.sh`](../scripts/08-starrocks/11-real-sn-vs-shared-data-stream-load.sh)
 
 ### CRUD 비교
 - 설명: INSERT/SELECT(point)/SELECT(집계)/UPDATE/DELETE 시퀀스를 양쪽 클러스터에서 비교한다.
@@ -131,24 +131,19 @@ FE 배치까지 끝낸 상태에서 CN을 1개→2개→3개로 늘려가며 두
 - 설명: fact/customer/product 스타 스키마 로드와 3-way JOIN을 양쪽 클러스터에서 비교한다.
 - 스크립트: [`13-real-sn-vs-shared-data-mpp.sh`](../scripts/08-starrocks/13-real-sn-vs-shared-data-mpp.sh)
 
-### 직렬 TPS
-- 설명: 단일 커넥션으로 같은 집계 쿼리를 200회 연속 실행해 워밍업 이후 정상 상태 지연을 측정한다.
+### 직렬/동시 TPS
+- 설명: 같은 집계 쿼리를 같은 테이블에 대해 직렬(단일 커넥션 200회 연속 — 워밍업 이후 정상 상태 지연)과 동시(mysql 클라이언트 20개 동시 실행 — 동시성 부하 QPS) 두 방식으로 순서대로 측정한다.
 - 스크립트: [`14-real-sn-vs-shared-data-agg-tps.sh`](../scripts/08-starrocks/14-real-sn-vs-shared-data-agg-tps.sh)
 
-### 동시 처리 TPS
-- 설명: mysql 클라이언트 20개를 동시에 띄워 동시성 부하에서의 QPS를 측정한다.
-- 스크립트: [`15-real-sn-vs-shared-data-agg-concurrent-tps.sh`](../scripts/08-starrocks/15-real-sn-vs-shared-data-agg-concurrent-tps.sh)
-
-### FE Follower 추가
-- 설명: FE Follower를 늘려 코디네이터 분산 효과를 확인한다(결과적으로 효과 없어 원복).
-- 스크립트: [`16-add-fe-followers.sh`](../scripts/08-starrocks/16-add-fe-followers.sh)
+### FE 코디네이터 분산 실험
+- 설명: FE Follower를 늘려 코디네이터 분산 효과를 확인했다(결과적으로 효과 없어 원복 — 이 절 본문 참고). 이후 투표에 영향 없는 Observer로 방향을 바꿨다 — [concepts/starrocks.md](../concepts/starrocks.md#fe-확장-follower-vs-observer)와 [17-add-fe-observer.sh](../scripts/08-starrocks/17-add-fe-observer.sh) 참고.
 
 ### 수동 조작(스크립트 없음)
 FE 배치·CN 개수·RGW 게이트웨이 개수 실험은 별도 스크립트 없이 아래 명령을 그때그때 직접 실행했다.
 
 ```bash
-# RGW 게이트웨이 1개 → 3개로 확장(04-objectstore.yaml의 gateway.instances 값 변경 후 적용)
-kubectl apply -f 04-objectstore.yaml
+# RGW 게이트웨이 개수 조정(cephadm 배치 선언 재적용)
+sudo cephadm shell -- ceph orch apply rgw starrocks-store --placement="chan08,chan09,llm001"
 
 # CN 등록/해제(개수 확장 실험)
 ALTER SYSTEM ADD COMPUTE NODE "...";

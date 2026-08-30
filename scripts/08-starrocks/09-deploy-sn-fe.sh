@@ -1,10 +1,9 @@
 #!/bin/bash
 # 진짜 shared-nothing(run_mode 기본값, RGW/S3 설정 전혀 없음) FE를 별도 네임스페이스
 # (starrocks-sn)에 배포한다. 기존 starrocks 네임스페이스의 FE는 run_mode=shared_data라
-# 아무리 replication_num을 지정해도 모든 테이블이 cloud-native(RGW 기반)로 만들어진다는
-# 걸 뒤늦게 발견해서(work/starrocks-architecture.md 참고), 진짜 로컬 스토리지 비교를
-# 하려면 별도 클러스터가 필요하다 — StarRocks는 한 클러스터에서 shared_nothing/shared_data
-# 혼합 배포를 지원하지 않는다(공식 문서로 확인).
+# 아무리 replication_num을 지정해도 모든 테이블이 cloud-native(RGW 기반)로 만들어진다 —
+# 진짜 로컬 스토리지 비교를 하려면 별도 클러스터가 필요하다. StarRocks는 한 클러스터에서
+# shared_nothing/shared_data 혼합 배포를 지원하지 않는다(공식 문서로 확인).
 #
 # 사용법: ./09-deploy-sn-fe.sh
 

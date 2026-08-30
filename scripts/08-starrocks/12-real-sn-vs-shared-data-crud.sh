@@ -1,9 +1,8 @@
 #!/bin/bash
 # 진짜 shared-nothing(starrocks-sn, 로컬 XFS) vs 진짜 shared-data(starrocks, RGW)
-# CRUD 성능 재비교. 05-crud-benchmark.sh와 동일한 방법론(SELECT NOW(6)로 서버 사이드
-# 시간만 측정)이지만, 이번엔 서로 다른 run_mode를 가진 완전히 별도의 FE 클러스터를
-# 대상으로 한다 — 05번은 같은 shared_data FE 안에서 BE/CN을 나눴는데, 그 BE 테이블도
-# 실제로는 cloud-native였다는 게 뒤늦게 밝혀졌기 때문(work/starrocks-architecture.md 참고).
+# CRUD 성능 비교. SELECT NOW(6)로 서버 사이드 시간만 측정한다. run_mode 자체가 다른
+# 완전히 별도의 FE 클러스터를 대상으로 한다 — 같은 FE 안에서 BE/CN만 나누면 CN 테이블도
+# 실제로는 cloud-native로 만들어져서 비교가 무효화된다(lessons/08-1-starrocks-analytics.md 참고).
 #
 # 사전 조건: 09-deploy-sn-fe.sh, 10-deploy-sn-be.sh(3노드) 실행 완료
 # 사용법: ./12-real-sn-vs-shared-data-crud.sh
