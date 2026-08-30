@@ -34,4 +34,4 @@
    - LAN·k8s 파드 양쪽에서 `k8s.home`/`ceph.home` 같은 이름으로 서비스 VIP 접속
    - 문서 [바로가기](lessons/09-internal-dns.md)
 
-`lessons/`에 목적, 스크립트별 실행 명령, 설계 결정, 알려진 이슈가 정리되어 있다. `scripts/`에는 실행 스크립트 파일만 있다. `concepts/`에는 [Kubernetes 개념 정리](concepts/kubernetes.md), [Ceph 개념 정리](concepts/ceph.md)처럼 배경 개념 설명을 모아둔다.
+`lessons/`에 목적, 스크립트별 실행 명령, 설계 결정, 알려진 이슈가 정리되어 있다. `scripts/`에는 실행 스크립트 파일만 있다. `concepts/`에는 [Kubernetes 개념 정리](concepts/kubernetes.md), [Ceph 개념 정리](concepts/ceph.md), [StarRocks 개념 정리](concepts/starrocks.md)처럼 배경 개념 설명을 모아둔다.
