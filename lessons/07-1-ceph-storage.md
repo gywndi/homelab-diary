@@ -16,7 +16,7 @@ Ceph 자체는 k8s 워크로드가 아니라 다른 서비스가 의존하는 �
 | chan09 | 10.5.5.9 | `/dev/sda1` | 500G |
 | llm001 | 10.5.5.10 | `/dev/nvme0n1p3` | 500G |
 
-각 파티션은 LVM 논리 볼륨(`ceph-osd-vg/osd-data`)으로 한 겹 감싸서 OSD로 등록한다 — 이유는 아래 "설계 결정" 참고. 나머지 디스크 공간은 XFS로 별도 마운트(`/mnt/starrocks-be`, StarRocks shared-nothing 로컬 테스트용) — 파티션을 어떻게 나눴는지는 아래 "디스크 재분할" 참고.
+각 파티션은 LVM 논리 볼륨(`ceph-osd-vg/osd-data`)으로 한 겹 감싸서 OSD로 등록한다 — 이유는 아래 "설계 결정" 참고. 나머지 디스크 공간은 XFS로 별도 마운트(`/mnt/local-data`, 로컬 저장이 필요한 다른 용도와 공용 — StarRocks shared-nothing 로컬 테스트, KVM VM 디스크가 지금 여기 같이 있다) — 파티션을 어떻게 나눴는지는 아래 "디스크 재분할" 참고.
 
 ## 설계 결정
 
@@ -236,7 +236,7 @@ EOF
 
 ### 디스크 재분할 — Ceph 고정 500G + XFS
 - 설명: 디스크 전체를 OSD에 주지 않는다. 다른 용도로 쓸 로컬 스토리지를 같은 디스크에서 떼어 남겨두려고, OSD 전용 디스크를 "Ceph 고정 500G + 나머지 XFS"로 재분할한다. llm001은 OS와 디스크(GPT)를 공유해서 이 스크립트 대신 대상 파티션만 `parted rm`으로 지우고 같은 시작 오프셋에서 수동으로 재생성했다.
-- 스크립트: [`12-resplit-osd-disk.sh`](../scripts/07-ceph-storage/12-resplit-osd-disk.sh) — 디바이스/Ceph 파티션 크기/마운트 경로를 인자로 받는다. chan08/chan09 둘 다 아래 값 그대로 실행했다: `sudo ./12-resplit-osd-disk.sh /dev/sda 500GB /mnt/starrocks-be`
+- 스크립트: [`12-resplit-osd-disk.sh`](../scripts/07-ceph-storage/12-resplit-osd-disk.sh) — 디바이스/Ceph 파티션 크기/마운트 경로를 인자로 받는다. chan08/chan09 둘 다 아래 값 그대로 실행했다: `sudo ./12-resplit-osd-disk.sh /dev/sda 500GB /mnt/local-data`
 ```bash
 # 기존 시그니처 정리(파티션 + 디스크 전체)
 sudo wipefs -a /dev/sda1
@@ -254,16 +254,16 @@ sudo partprobe /dev/sda
 sudo mkfs.xfs -f /dev/sda2
 
 # 마운트 경로 생성 + 마운트
-sudo mkdir -p /mnt/starrocks-be
-sudo mount /dev/sda2 /mnt/starrocks-be
+sudo mkdir -p /mnt/local-data
+sudo mount /dev/sda2 /mnt/local-data
 
 # 재부팅해도 안 바뀌는 UUID 확인
 sudo blkid -s UUID -o value /dev/sda2
 
 # 디바이스 이름이 아니라 UUID로 fstab에 등록 — 재부팅 시 디바이스 순서가 바뀌어도 안전
-# (예: UUID=2e346eca-8a4d-4d59-8897-4b5d84aefdc3  /mnt/starrocks-be  xfs  defaults  0  2)
+# (예: UUID=2e346eca-8a4d-4d59-8897-4b5d84aefdc3  /mnt/local-data  xfs  defaults  0  2)
 ```
-결과: 3노드 전부 OSD 500G로 균등화됐다. 나머지는 `/mnt/starrocks-be`에 마운트(chan08/09 457G, llm001 260G — OS와 디스크를 공유해서 더 작음).
+결과: 3노드 전부 OSD 500G로 균등화됐다. 나머지는 `/mnt/local-data`에 마운트(chan08/09 457G, llm001 260G — OS와 디스크를 공유해서 더 작음).
 
 ### 애플리케이션에서 RGW 쓰기(boto3 S3 API)
 - 설명: RGW는 애플리케이션이 보통 S3 API로 직접 접근한다. RBD는 k8s CSI/libvirt가 대신 처리해서 애플리케이션 코드가 직접 다루지 않는다. 버킷 생성은 `radosgw-admin`으로는 안 된다. S3 API로만 가능하다. 유저를 먼저 만든 뒤 boto3로 접근한다.
@@ -297,7 +297,7 @@ LVM 논리 볼륨으로 한 겹 감싼 뒤(`pvcreate`/`vgcreate`/`lvcreate`) 그
 빈 내용으로라도 직접 만들어줘야 `csi-rbdplugin` 파드가 뜬다.
 
 ### 디스크를 재분할하면 그 위 hostPath 디렉터리도 같이 사라진다
-StarRocks shared-nothing BE가 쓰는 `/mnt/starrocks-be/sn-data`는 XFS 파티션 위 디렉터리라서, 파티션을 다시 나누면 같이 없어진다. BE를 다시 배포하기 전에 노드마다 새로 만들어야 한다.
+StarRocks shared-nothing BE가 쓰는 `/mnt/local-data/sn-data`는 XFS 파티션 위 디렉터리라서, 파티션을 다시 나누면 같이 없어진다. BE를 다시 배포하기 전에 노드마다 새로 만들어야 한다.
 
 ### RGW 데이터 풀의 size=2 결정이 재구축 과정에서 조용히 사라져 있었다
 Rook 시절엔 `default.rgw.buckets.data`를 의도적으로 size=2로 낮춰뒀는데(아래 "남아있는 리스크" 참고), cephadm으로 재구축하면서 이 설정을 다시 적용하는 걸 빠뜨렸다. `ceph orch apply rgw`가 데이터 풀을 처음 만들 때 클러스터 기본값(3노드 클러스터라 size=3)으로 만들기 때문에, 별도로 낮추지 않으면 조용히 3-replica로 굳어진다. 에러도, 경고도 없어서 [`08-2-starrocks-analytics-bmt.md`](08-2-starrocks-analytics-bmt.md) 재측정 중 STREAM LOAD 쓰기 성능이 예상 밖으로 나빠진 걸 보고 나서야 발견했다. `18-cephadm-rgw.sh`에 이제 이 단계를 포함시켰다 — RGW 배치를 새로 하거나 realm을 다시 만드는 등 데이터 풀이 재생성되는 상황에서는 이 값을 다시 확인할 것.

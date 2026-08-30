@@ -55,7 +55,7 @@ Table → Partition → Tablet → Rowset → Segment
 - **StatefulSet이 아니라 Deployment + headless Service.** 공식 StarRocks Kubernetes Operator는 StatefulSet 기반이다. 하지만 이 규모(단일/소수 인스턴스)에서는 순번 관리 같은 StatefulSet의 이점이 필요 없다. 실제로 필요한 건 하나뿐이었다 — "클러스터 DNS로 항상 같은 이름으로 자기 자신을 찾을 수 있는 것". headless Service(`clusterIP: None`) + 파드의 `hostname`/`subdomain` 필드 조합만으로 충분했다.
 - **RGW 자격증명은 git에 올리지 않는다.** fe.conf는 파일 형태라 k8s Secret을 네이티브로 참조할 수 없다. 배포 스크립트가 Secret에서 값을 읽어 `sed`로 템플릿에 주입한 뒤 ConfigMap으로 적용하는 방식을 택했다.
 - **버킷 생성은 radosgw-admin이 아니라 수동 서명한 S3 PUT으로.** radosgw-admin은 유저/정책 관리만 한다. 버킷 자체는 S3 API로만 만들 수 있다. awscli 같은 별도 도구를 설치하는 대신 bash+openssl로 AWS SigV2 서명을 직접 계산했다.
-- **shared-nothing 검증용 클러스터는 완전히 별도 네임스페이스(`starrocks-sn`).** `run_mode`(shared-data인지 아닌지)는 FE를 처음 띄울 때 정해지는 클러스터 전역 설정이다. 나중에 못 바꾼다. 그래서 기존 클러스터를 고치지 않고 새 FE를 `run_mode` 지정 없이(기본값) 배포했다. BE 3개는 기존 XFS 파티션의 하위 디렉토리(`/mnt/starrocks-be/sn-data`)를 썼다. shared-data 클러스터의 datacache와는 물리적으로 분리된다.
+- **shared-nothing 검증용 클러스터는 완전히 별도 네임스페이스(`starrocks-sn`).** `run_mode`(shared-data인지 아닌지)는 FE를 처음 띄울 때 정해지는 클러스터 전역 설정이다. 나중에 못 바꾼다. 그래서 기존 클러스터를 고치지 않고 새 FE를 `run_mode` 지정 없이(기본값) 배포했다. BE 3개는 기존 XFS 파티션의 하위 디렉토리(`/mnt/local-data/sn-data`)를 썼다. shared-data 클러스터의 datacache와는 물리적으로 분리된다.
 - **기존 shared-data FE에 BE를 추가로 등록하는 "하이브리드" 구성은 시도했다가 버렸다.** `ALTER SYSTEM ADD BACKEND`로 BE를 등록하는 것 자체는 된다. 하지만 `run_mode=shared_data`인 이상 그렇게 만든 테이블도 여전히 cloud-native(RGW 기반)로 만들어진다 — 로컬 BE로 라우팅되는 게 아니다. 이 전제로 돌린 초기 벤치마크(CRUD/MPP/STREAM LOAD)는 결국 CN을 CN과 비교한 셈이라 무효였다. 그래서 위처럼 완전히 별도 FE로 갔다.
 
 ## 스크립트 목록 (이름 순)

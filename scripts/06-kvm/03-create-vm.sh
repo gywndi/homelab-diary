@@ -16,7 +16,7 @@ if [[ -z "$NAME" || -z "$IP" || -z "$GW" ]]; then
   exit 1
 fi
 
-POOL_DIR="/mnt/starrocks-be/vm-disks"
+POOL_DIR="/mnt/local-data/vm-disks"
 IMG_URL="https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img"
 BASE_IMG="${POOL_DIR}/noble-server-cloudimg-amd64.img"
 DISK="${POOL_DIR}/${NAME}.qcow2"

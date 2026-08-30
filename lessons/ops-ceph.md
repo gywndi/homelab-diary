@@ -151,4 +151,4 @@ cephadm shell -- ceph dashboard ac-user-set-password admin -i <새 비밀번호�
 - **krbd 매핑이 `secret too big`으로 실패**: 신규 클러스터의 기본 인증 cipher가 커널 krbd와 안 맞는 문제 — `ceph mon set auth_allowed_ciphers "aes, aes256k"` 필요(부트스트랩 스크립트에 이미 포함되지만, 클러스터를 재부트스트랩한 경우 놓치기 쉽다). [`07-1-ceph-storage.md`의 관련 알려진 이슈](07-1-ceph-storage.md#알려진-이슈) 참고.
 - **RGW VIP에 접속이 안 됨**: 3노드 전부에서 keepalived가 죽어있을 수 있다 — 위 "RGW VIP" 섹션으로 어느 노드가 들고 있는지부터 확인. RGW 데몬 자체가 죽은 경우(`ceph orch ps`에서 rgw 행 확인)와 구분할 것.
 - **버킷 생성이 반복 실패**: `radosgw-admin`으로는 버킷을 못 만든다 — S3 API(boto3/curl SigV2)로만 가능. 이미 있는 버킷에 재시도하면 `BucketAlreadyOwnedByYou`(같은 유저라 무해) 또는 `BucketAlreadyExists`(다른 유저 소유, 이름 충돌) 에러가 정상적으로 난다.
-- **디스크를 재분할했더니 그 위 데이터가 사라짐**: OSD 파티션 옆에 나눠둔 XFS 파티션(`/mnt/starrocks-be`) 위의 데이터는 Ceph가 보호해주지 않는다 — 파티션을 다시 나누면 그 안의 애플리케이션 데이터(예: StarRocks shared-nothing BE)도 같이 없어진다.
+- **디스크를 재분할했더니 그 위 데이터가 사라짐**: OSD 파티션 옆에 나눠둔 XFS 파티션(`/mnt/local-data`) 위의 데이터는 Ceph가 보호해주지 않는다 — 파티션을 다시 나누면 그 안의 애플리케이션 데이터(예: StarRocks shared-nothing BE)도 같이 없어진다.

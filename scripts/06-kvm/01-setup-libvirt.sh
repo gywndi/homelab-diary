@@ -22,11 +22,11 @@ systemctl enable --now libvirtd
 
 echo "== vm-pool storage pool 등록 (07-ceph-storage의 XFS 파티션 위) =="
 # /data/vms는 더 이상 없다 — Ceph 도입 과정에서 디스크가 재분할되며 사라졌다.
-# 남은 로컬 XFS 파티션(/mnt/starrocks-be, StarRocks shared-nothing과 공유)의
-# 여유 공간을 그대로 쓴다. lessons/06-1-kvm.md "알려진 이슈" 참고.
-mkdir -p /mnt/starrocks-be/vm-disks
+# 남은 로컬 XFS 파티션(/mnt/local-data, StarRocks shared-nothing과도 같이 쓰는
+# 범용 파티션)의 여유 공간을 그대로 쓴다. lessons/06-kvm.md "알려진 이슈" 참고.
+mkdir -p /mnt/local-data/vm-disks
 if ! virsh pool-info vm-pool >/dev/null 2>&1; then
-  virsh pool-define-as vm-pool dir --target /mnt/starrocks-be/vm-disks
+  virsh pool-define-as vm-pool dir --target /mnt/local-data/vm-disks
   virsh pool-build vm-pool
   virsh pool-start vm-pool
   virsh pool-autostart vm-pool

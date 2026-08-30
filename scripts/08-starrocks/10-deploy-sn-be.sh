@@ -1,10 +1,11 @@
 #!/bin/bash
 # starrocks-sn(진짜 shared-nothing) FE에 로컬 스토리지 BE를 추가 등록한다.
-# hostPath는 기존 XFS 파티션(/mnt/starrocks-be)의 하위 디렉토리(sn-data)를 써서,
+# hostPath는 각 노드의 로컬 XFS 파티션(/mnt/local-data, KVM VM 디스크와도 같이
+# 쓰는 범용 파티션 — lessons/06-kvm.md 참고)의 하위 디렉토리(sn-data)를 써서,
 # 같은 노드의 starrocks 네임스페이스(shared_data) BE가 쓰는 datacache와 물리적으로
 # 겹치지 않게 분리한다.
 #
-# 사전 조건: 09-deploy-sn-fe.sh 실행 완료, 대상 노드에 /mnt/starrocks-be/sn-data 존재
+# 사전 조건: 09-deploy-sn-fe.sh 실행 완료, 대상 노드에 /mnt/local-data/sn-data 존재
 # 사용법: ./10-deploy-sn-be.sh <노드 hostname> <배포 이름 접미사, 예: 1/2/3>
 
 set -euo pipefail
@@ -17,7 +18,7 @@ if [[ -z "$NODE" || -z "$SUFFIX" ]]; then
 fi
 
 BE_VERSION="4.1.4"
-XFS_PATH="/mnt/starrocks-be/sn-data"
+XFS_PATH="/mnt/local-data/sn-data"
 NAME="sn-be${SUFFIX}"
 
 kubectl -n starrocks-sn create configmap "${NAME}-conf" \

@@ -14,7 +14,7 @@
 #
 # 사용법: 대상 노드에서 실행
 #   ./12-resplit-osd-disk.sh <디바이스> <ceph파티션크기> <마운트경로>
-#   예 (sda 전용 디스크, msdos): ./12-resplit-osd-disk.sh /dev/sda 300GB /mnt/starrocks-be
+#   예 (sda 전용 디스크, msdos): ./12-resplit-osd-disk.sh /dev/sda 300GB /mnt/local-data
 #
 # llm001처럼 OS와 같은 GPT 디스크를 공유하는 경우, 이 스크립트를 쓰지 말고 대상 파티션만
 # `parted rm <번호>` 후 동일한 시작 오프셋으로 재생성하는 방식을 수동으로 적용할 것
