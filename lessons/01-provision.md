@@ -141,6 +141,7 @@ cat <<'EOF' | sudo tee -a /etc/hosts
 # END homelab-infra-hosts
 EOF
 ```
+새 인프라 노드/VIP를 추가할 땐 이 목록에도 한 줄 추가하고 3노드 각각에서 재실행해야 한다(CoreDNS ConfigMap과 달리 자동으로 안 따라옴) — 전체 체크리스트는 [내부 DNS 문서의 "신규 노드/인프라 장비 추가 시"](09-internal-dns.md#신규-노드인프라-장비-추가-시) 참고.
 
 ## 방화벽 정책 ([`04-firewall.sh`](../scripts/01-provision/04-firewall.sh))
 

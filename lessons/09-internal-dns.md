@@ -137,6 +137,20 @@ kubectl -n internal-dns rollout restart deployment internal-dns
 # 롤아웃 완료 대기
 kubectl -n internal-dns rollout status deployment internal-dns --timeout=60s
 ```
+새 도메인 하나가 이름을 반드시 두 곳에 등록해야 하는 경우가 있다 — 아래 "신규 노드/인프라 장비 추가 시" 참고.
+
+### 신규 노드/인프라 장비 추가 시
+- 설명: 물리 노드나 새 인프라 VIP(`<이름>.home`, `.20` 이하 대역)를 하나 추가할 때 빠뜨리기 쉬운 체크리스트. **애플리케이션 VIP**(`.50~.99`, 예: `foo.k8s.home`)는 아래 1번만 하면 된다 — `/etc/hosts` 안전망은 "DNS 자체를 서비스하는 인프라"에만 필요하기 때문이다(위 "설계 결정" 참고).
+
+1. **CoreDNS에 등록** — `internal-dns-corefile` ConfigMap의 `hosts` 블록에 `<IP> <이름>` 한 줄 추가, 위 "새 도메인 추가" 절차로 반영.
+2. **(인프라 도메인이면 추가로) 3노드 `/etc/hosts`에도 등록** — [`06-hosts-static-entries.sh`](../scripts/01-provision/06-hosts-static-entries.sh)의 heredoc 안에 같은 줄을 추가한 뒤, chan08/chan09/llm001 3대 각각에서 스크립트를 재실행한다. 이 스크립트는 목록이 파일 안에 하드코딩돼 있어서 CoreDNS ConfigMap처럼 "값만 넘기면 자동 반영"되지 않는다 — **1번만 하고 2번을 빠뜨리면**, DNS가 정상일 땐 아무 문제가 없다가 CoreDNS 자체가 죽는 순간 이 3노드조차 새 이름을 못 풀게 되는, 당장은 안 드러나는 결함이 생긴다.
+   ```bash
+   # 새 도메인을 스크립트에 추가한 뒤, 3노드 각각에서
+   sudo ./06-hosts-static-entries.sh
+   ```
+3. **검증** — 아래 "검증 명령"의 `dig`(CoreDNS 응답)와 `getent hosts`(3노드 `/etc/hosts` 반영)를 새 도메인으로 각각 실행.
+
+노드가 아니라 사람이 쓰는 워크스테이션(예: 이 Mac)은 이 체크리스트와 무관하다 — DNS를 못 서비스하는 쪽이라 `/etc/hosts` 안전망이 필요 없고, 공유기 DHCP 주 DNS(`10.5.5.2`) 설정만 따른다.
 
 ## 알려진 이슈
 
