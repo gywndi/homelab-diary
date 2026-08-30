@@ -210,7 +210,38 @@ sudo mv /var/lib/etcd/etcd-backup-tmp.db /data/etcd-backup/etcd-snapshot-<타임
 - **뒤늦게 VIP를 끼워 넣으려면 인증서까지 건드려야 한다**: 이미 발급된 apiserver 인증서의 SAN(Subject Alternative Name)에는 VIP가 없어서, `ClusterConfiguration`을 고쳐 controlPlaneEndpoint를 추가한 뒤 인증서를 강제로 재발급해야 한다. `kubeadm init phase certs apiserver`는 파일이 이미 있으면 재발급을 건너뛰므로 기존 파일을 지워야 하고, 떠 있는 apiserver 프로세스는 재시작해야 새 인증서를 읽는다(정적 파드 매니페스트를 잠깐 옮겼다 되돌리는 방식으로 강제).
 - **join 명령 생성도 옛날 주소를 계속 가리킨다**: `kubeadm token create --print-join-command`가 참조하는 `kube-public/cluster-info` ConfigMap은 `ClusterConfiguration`과 별개로 저장돼 있어서, 위 재발급을 해도 자동으로 안 바뀐다. 이것까지 따로 고치지 않으면 새로 뽑은 join 명령이 여전히 옛날 고정 IP를 가리켜서 헷갈리는 실패를 겪는다.
 
-이미 고정 IP로 초기화해버린 클러스터가 있다면 [`10-retrofit-control-plane-endpoint-from-fixed-ip.sh`](../scripts/02-k8s-cluster/10-retrofit-control-plane-endpoint-from-fixed-ip.sh)로 위 세 가지를 한 번에 처리할 수 있다 (기존 컨트롤플레인에서 1회 실행). 하지만 애초에 이 문서처럼 [`04-init-control-plane.sh`](../scripts/02-k8s-cluster/04-init-control-plane.sh) 단계에서 VIP를 미리 정해두면 이 스크립트 자체가 필요 없다 — **컨트롤플레인을 하나만 쓸 계획이라도, 나중에 늘릴 가능성이 조금이라도 있다면 처음부터 VIP로 시작하는 쪽이 훨씬 싸게 먹힌다.**
+이미 고정 IP로 초기화해버린 클러스터가 있다면 [`10-retrofit-control-plane-endpoint-from-fixed-ip.sh`](../scripts/02-k8s-cluster/10-retrofit-control-plane-endpoint-from-fixed-ip.sh)로 위 세 가지를 한 번에 처리할 수 있다 (기존 컨트롤플레인에서 1회 실행, `sudo ./10-retrofit-control-plane-endpoint-from-fixed-ip.sh <VIP>`). 하지만 애초에 이 문서처럼 [`04-init-control-plane.sh`](../scripts/02-k8s-cluster/04-init-control-plane.sh) 단계에서 VIP를 미리 정해두면 이 스크립트 자체가 필요 없다 — **컨트롤플레인을 하나만 쓸 계획이라도, 나중에 늘릴 가능성이 조금이라도 있다면 처음부터 VIP로 시작하는 쪽이 훨씬 싸게 먹힌다.**
+
+내부적으로 하는 일(순서대로):
+```bash
+# 1) kube-system의 kubeadm-config ConfigMap에 controlPlaneEndpoint/certSAN 추가
+kubectl -n kube-system get cm kubeadm-config -o jsonpath='{.data.ClusterConfiguration}' > /tmp/kubeadm-cluster-config.yaml
+# (apiServer.certSANs에 VIP 추가 + controlPlaneEndpoint: <VIP>:6443 append 후)
+kubectl -n kube-system create cm kubeadm-config \
+  --from-file=ClusterConfiguration=/tmp/kubeadm-cluster-config.yaml \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+# 2) apiserver 인증서를 새 SAN 포함해서 강제 재발급 (기존 파일이 있으면 kubeadm이 건너뛰므로 지워야 함)
+rm /etc/kubernetes/pki/apiserver.crt /etc/kubernetes/pki/apiserver.key
+kubeadm init phase certs apiserver --config /tmp/kubeadm-cluster-config.yaml
+
+# 3) apiserver 정적 파드 강제 재기동 (매니페스트를 잠깐 옮겼다 되돌리면 kubelet이 재기동시킴)
+mv /etc/kubernetes/manifests/kube-apiserver.yaml /tmp/kube-apiserver.yaml.tmp
+sleep 5
+mv /tmp/kube-apiserver.yaml.tmp /etc/kubernetes/manifests/kube-apiserver.yaml
+
+# 4) admin.conf(사람용 kubeconfig)의 server 주소를 VIP로 변경
+sed -i "s#https://<이 노드 IP>:6443#https://<VIP>:6443#" /etc/kubernetes/admin.conf
+cp -f /etc/kubernetes/admin.conf ~/.kube/config
+
+# 5) kube-public/cluster-info도 VIP로 갱신 (안 하면 join 명령이 계속 옛 고정 IP를 가리킴)
+kubectl -n kube-public get cm cluster-info -o jsonpath='{.data.kubeconfig}' > /tmp/cluster-info-kubeconfig.yaml
+sed -i "s#server: https://<이 노드 IP>:6443#server: https://<VIP>:6443#" /tmp/cluster-info-kubeconfig.yaml
+kubectl -n kube-public create cm cluster-info \
+  --from-file=kubeconfig=/tmp/cluster-info-kubeconfig.yaml \
+  --dry-run=client -o yaml | kubectl apply -f -
+```
+실행 후 [`05-setup-apiserver-vip-keepalived.sh`](../scripts/02-k8s-cluster/05-setup-apiserver-vip-keepalived.sh)로 이어서 VIP를 실제로 띄우면 정상 절차(04→05→06)를 따라온 상태와 동일해진다.
 
 ## 알려진 이슈: UFW가 pod 네트워크를 막음
 
