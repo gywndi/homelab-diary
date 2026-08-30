@@ -55,7 +55,7 @@ flowchart TB
 
 ### 방화벽 포트 추가
 - 설명: 기존에 다른 용도로 쓰던 UFW 호스트에 k8s 컨트롤플레인+워커 포트를 추가한다 (`01-provision`을 거치지 않고 편입되는 서버용).
-- 스크립트: [`00-open-k8s-firewall-ports.sh`](../scripts/06-llm-gpu-node/00-open-k8s-firewall-ports.sh)
+- 스크립트: [`00-open-k8s-firewall-ports.sh`](../scripts/05-llm-gpu-node/00-open-k8s-firewall-ports.sh)
 ```bash
 # kubelet API
 sudo ufw allow from 10.5.5.0/24 to any port 10250 proto tcp comment 'kubelet API'
@@ -89,7 +89,7 @@ sudo ufw reload
 
 ### NVIDIA 드라이버 재설치
 - 설명: 기존 드라이버를 완전히 제거하고 `ubuntu-drivers devices`가 추천하는 버전으로 재설치한다.
-- 스크립트: [`01-reinstall-nvidia-driver.sh`](../scripts/06-llm-gpu-node/01-reinstall-nvidia-driver.sh)
+- 스크립트: [`01-reinstall-nvidia-driver.sh`](../scripts/05-llm-gpu-node/01-reinstall-nvidia-driver.sh)
 ```bash
 # 추천 드라이버 확인
 ubuntu-drivers devices
@@ -115,7 +115,7 @@ sudo apt-mark hold nvidia-driver-595-open
 
 ### containerd nvidia 런타임 설정
 - 설명: containerd의 기본 런타임을 nvidia로 지정한다 (일반 컨테이너에는 runc와 동일하게 동작하므로 RuntimeClass 없이 바로 기본값으로 지정).
-- 스크립트: [`02-configure-nvidia-containerd-runtime.sh`](../scripts/06-llm-gpu-node/02-configure-nvidia-containerd-runtime.sh)
+- 스크립트: [`02-configure-nvidia-containerd-runtime.sh`](../scripts/05-llm-gpu-node/02-configure-nvidia-containerd-runtime.sh)
 ```bash
 sudo nvidia-ctk runtime configure --runtime=containerd --set-as-default
 sudo systemctl restart containerd
@@ -130,7 +130,7 @@ sudo systemctl restart containerd
   - `--apiserver-advertise-address` : 이 노드의 apiserver가 자기 자신의 IP로 클러스터에 알리는 주소 (멀티 NIC 환경에서 명시 필요)
 
   컨트롤플레인이 처음부터 VIP(10.5.5.3)를 `controlPlaneEndpoint`로 잡고 시작했으므로([`02-k8s-cluster.md`](02-k8s-cluster.md) 참고), `kubeadm token create --print-join-command`가 출력하는 join 명령도 이미 이 VIP를 가리킨다 — 고정 IP를 쓰던 시절처럼 클러스터 설정이나 인증서를 따로 손볼 필요가 없다.
-- 스크립트: [`03-join-control-plane.sh`](../scripts/06-llm-gpu-node/03-join-control-plane.sh)
+- 스크립트: [`03-join-control-plane.sh`](../scripts/05-llm-gpu-node/03-join-control-plane.sh)
 ```bash
 # 기존 컨트롤플레인(chan08)에서 매번 새로 발급 (토큰/cert-key 둘 다 짧은 TTL)
 kubeadm token create --print-join-command
@@ -154,14 +154,14 @@ sudo ../02-k8s-cluster/05-setup-apiserver-vip-keepalived.sh 10.5.5.3 <이 노드
 
 ### GPU 노드 라벨
 - 설명: device-plugin의 `nodeSelector`가 찾을 수 있도록 라벨을 건다. (처음엔 taint도 같이 걸어 이 노드를 GPU 전용으로 막았으나, GPU 요청 파드는 리소스 제약만으로도 이 노드로만 스케줄되고 taint는 일반 워크로드를 못 쓰게 막는 손해만 있어서 이후 제거했다 — 위 설계 결정 참고)
-- 스크립트: [`04-label-gpu-node.sh`](../scripts/06-llm-gpu-node/04-label-gpu-node.sh)
+- 스크립트: [`04-label-gpu-node.sh`](../scripts/05-llm-gpu-node/04-label-gpu-node.sh)
 ```bash
 kubectl label node llm001 nvidia.com/gpu=true
 ```
 
 ### nvidia-device-plugin 설치
 - 설명: `nvidia.com/gpu` 리소스를 노드에 노출시키는 DaemonSet을 설치한다. GPU 라벨이 붙은 노드에만 스케줄되고, 어떤 taint가 있든 살아남도록 와일드카드 toleration을 쓴다.
-- 스크립트: [`05-apply-nvidia-device-plugin.sh`](../scripts/06-llm-gpu-node/05-apply-nvidia-device-plugin.sh)
+- 스크립트: [`05-apply-nvidia-device-plugin.sh`](../scripts/05-llm-gpu-node/05-apply-nvidia-device-plugin.sh)
 ```yaml
 apiVersion: apps/v1
 kind: DaemonSet
@@ -213,3 +213,31 @@ kubectl label node chan08 chan09 llm001 node.kubernetes.io/exclude-from-external
 
 ### 컨트롤플레인을 고정 IP로 시작했다면 이 문서의 join 절차만으로는 부족함
 이 문서의 join 절차는 컨트롤플레인이 처음부터 VIP로 시작했다고 가정한다(현재 [`02-k8s-cluster.md`](02-k8s-cluster.md) 기준). 고정 IP로 초기화한 클러스터에 뒤늦게 VIP를 끼워 넣으려면 인증서 재발급 등 훨씬 번거로운 절차가 추가로 필요한데, 그 내용과 실제로 이 문제를 겪었던 이력은 [`02-k8s-cluster.md`의 "알려진 이슈: 고정 IP로 시작하면 나중에 힘들다"](02-k8s-cluster.md#알려진-이슈-고정-ip로-시작하면-나중에-힘들다)에 정리해뒀다.
+
+## 검증 명령
+
+```bash
+# 3노드 전부 Ready + control-plane 롤인지 (taint는 3대 전부 제거해서 안 보이는 게 정상)
+kubectl get nodes -o wide
+
+# etcd 멤버 3개 전부 started인지 (쿼럼 3 확인)
+kubectl -n kube-system exec etcd-chan08 -- etcdctl member list \
+  --endpoints=https://127.0.0.1:2379 \
+  --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+  --cert=/etc/kubernetes/pki/etcd/healthcheck-client.crt \
+  --key=/etc/kubernetes/pki/etcd/healthcheck-client.key -w table
+
+# API 서버 VIP를 3대 중 아무나 하나가 들고 있는지 (각 노드에서 실행, 나오는 노드가 보유)
+ip -4 addr show | grep 10.5.5.3
+
+# llm001에 nvidia.com/gpu 리소스가 스케줄러에 노출됐는지
+kubectl get nodes -o json | jq '.items[] | {name:.metadata.name, gpu:.status.allocatable."nvidia.com/gpu"}'
+
+# GPU를 요청하는 테스트 파드가 실제로 llm001에만 스케줄되고 GPU를 인식하는지
+kubectl run gpu-test --rm -it --restart=Never --image=nvidia/cuda:12.6.0-base-ubuntu24.04 \
+  --overrides='{"spec":{"containers":[{"name":"gpu-test","image":"nvidia/cuda:12.6.0-base-ubuntu24.04","command":["nvidia-smi"],"resources":{"limits":{"nvidia.com/gpu":"1"}}}]}}' \
+  -- nvidia-smi
+
+# 컨트롤플레인 taint/exclude-from-external-load-balancers 라벨이 전부 제거된 상태인지 (위 "알려진 이슈" 참고)
+kubectl get nodes -o json | jq '.items[] | {name:.metadata.name, taints:.spec.taints, excludeLabel:.metadata.labels."node.kubernetes.io/exclude-from-external-load-balancers"}'
+```

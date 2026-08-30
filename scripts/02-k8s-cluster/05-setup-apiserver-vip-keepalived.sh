@@ -11,7 +11,7 @@
 # 클러스터 설정을 뜯어고칠 필요가 없다 — 자세한 사정은 lessons/02-k8s-cluster.md의
 # "알려진 이슈: 고정 IP로 시작하면 나중에 힘들다" 참고.
 #
-# 컨트롤플레인을 추가할 때마다(예: lessons/06-llm-gpu-node.md) 새 노드에서 이
+# 컨트롤플레인을 추가할 때마다(예: lessons/05-llm-gpu-node.md) 새 노드에서 이
 # 스크립트를 STATE=BACKUP, 더 낮은 PRIORITY로 다시 실행해서 같은 VIP를 나눠 갖게 한다.
 #
 # 사용법: sudo ./05-setup-apiserver-vip-keepalived.sh <VIP> <인터페이스> <MASTER|BACKUP> <우선순위> <VRRP 인증암호>

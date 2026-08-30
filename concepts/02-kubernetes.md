@@ -106,7 +106,7 @@ llm001   Ready    control-plane   8h    v1.36.4   10.5.5.10
 - kube-system: coredns (Deployment)
 - kube-flannel: kube-flannel-ds (DaemonSet) — CNI는 kubeadm이 자동으로 깔아주지 않고 따로 설치해야 하지만, 파드 네트워크가 동작하려면 반드시 있어야 해서 사실상 베이스라인에 포함된다.
 
-3번(metallb-system), 4번의 ingress-nginx, 5번(cert-manager, cm-acme-http-solver)은 Stage 5에서, 6번(nvidia-device-plugin)은 Stage 6(GPU 노드 추가, [`06-llm-gpu-node.md`](../lessons/06-llm-gpu-node.md))에서 나중에 얹은 것들이다.
+3번(metallb-system), 4번의 ingress-nginx, 5번(cert-manager, cm-acme-http-solver)은 Stage 5에서, 6번(nvidia-device-plugin)은 Stage 6(GPU 노드 추가, [`05-llm-gpu-node.md`](../lessons/05-llm-gpu-node.md))에서 나중에 얹은 것들이다.
 
 ### 1. 정적 파드 — etcd, kube-apiserver, kube-controller-manager, kube-scheduler (3대 전부)
 ```bash
@@ -153,7 +153,7 @@ kubectl -n kube-system exec etcd-chan08 -- etcdctl member list \
 - **노드를 1대만 추가해서는 안 고쳐진다.** etcd는 과반수(quorum) 투표로 동작해서 절대 짝수로 두면 안 된다 — 컨트롤플레인 2대면 하나가 죽었을 때 남은 1대가 "과반"이 안 돼서(2대 중 1대는 정확히 절반이지 과반이 아님) 여전히 아무것도 못 하고, 오히려 네트워크가 잠깐 끊기기만 해도 스플릿 브레인 위험만 늘어난다.
 - **물리 노드가 3대가 되면서 실제로 고쳤다.** chan09, llm001을 순서대로 `kubeadm join --control-plane`으로 합류시켜서 etcd 멤버 3개(홀수)를 만들었다 — 이제 아무 노드 1대가 죽어도 나머지 2대가 과반이라 클러스터가 계속 동작한다.
 - **API 서버 접속용 VIP도 별도로 필요하다.** etcd/apiserver가 3대에 분산돼도, kubectl이나 각 노드의 kubelet이 여전히 chan08 IP 하나만 보고 있으면 chan08이 죽었을 때 여전히 접속할 곳이 없다. keepalived로 VIP(10.5.5.3)를 3대가 우선순위 기반으로 나눠 갖게 하고, `admin.conf`(kubectl 설정)가 이 VIP를 보게 만들었다 — VIP를 든 노드는 자기 자신의 apiserver가 그대로 응답하므로 별도 로드밸런서가 없어도 된다.
-- **kubelet/controller-manager/scheduler의 kubeconfig는 VIP가 아니라 각자 자기 자신의 IP를 본다** — kubeadm이 컨트롤플레인 노드마다 그렇게 자동 생성해준다. 로컬 apiserver가 제일 빠르고, 그 노드가 살아있으면 로컬 apiserver도 살아있다고 보기 때문에 의도된 동작이다. 그래서 이 공유 진입점은 사실상 `admin.conf`(사람이 쓰는 kubectl 접속)용으로만 쓰인다. VIP를 처음 잡아두는 절차는 [`02-k8s-cluster.md`](../lessons/02-k8s-cluster.md), 컨트롤플레인을 늘리며 VIP를 나눠 갖게 하는 절차는 [`06-llm-gpu-node.md`](../lessons/06-llm-gpu-node.md) 참고.
+- **kubelet/controller-manager/scheduler의 kubeconfig는 VIP가 아니라 각자 자기 자신의 IP를 본다** — kubeadm이 컨트롤플레인 노드마다 그렇게 자동 생성해준다. 로컬 apiserver가 제일 빠르고, 그 노드가 살아있으면 로컬 apiserver도 살아있다고 보기 때문에 의도된 동작이다. 그래서 이 공유 진입점은 사실상 `admin.conf`(사람이 쓰는 kubectl 접속)용으로만 쓰인다. VIP를 처음 잡아두는 절차는 [`02-k8s-cluster.md`](../lessons/02-k8s-cluster.md), 컨트롤플레인을 늘리며 VIP를 나눠 갖게 하는 절차는 [`05-llm-gpu-node.md`](../lessons/05-llm-gpu-node.md) 참고.
 - **왜 VIP(keepalived)고 DNS 라운드로빈/페일오버는 아닌지.** 도메인 하나에 여러 IP를 걸어두는 방식(멀티 데이터센터처럼 VRRP가 아예 안 되는 환경에서 흔히 씀)도 기능적으로는 가능하다. 하지만 DNS는 "누가 살아있는지" 자체를 모른다 — 죽은 IP로 접속을 실제로 시도해서 실패한 뒤에야 재시도하고, TTL을 아무리 낮춰도 헬스체크와 레코드 갱신을 능동적으로 해주는 별도 장치(Route53 헬스체크 같은) 없이는 그마저도 안 되며, 캐시 전파 시간만큼 항상 VIP보다 느리다. VRRP(keepalived)는 같은 서브넷(L2)에 있어야 한다는 제약이 있는 대신, 캐시 계층 없이 초 단위로 즉시 넘어간다. 우리는 3대가 전부 같은 서브넷(10.5.5.0/24)이라 VRRP 제약에 안 걸리므로 VIP 쪽을 택했다 — 노드가 서로 다른 네트워크(멀티 사이트)에 흩어지는 상황이 오면 그때는 DNS 기반 페일오버로 갈아타야 한다.
 
 ### API 서버를 꼭 거쳐야 하나 — 우회 경로
@@ -249,7 +249,7 @@ ingress-nginx-controller-ccfdd7f8c-tqpmb   1/1     Running   chan08
 ```
 - 둘 다 "같은 라벨의 파드는 서로 다른 노드에"를 `requiredDuringSchedulingIgnoredDuringExecution`(강제)로 걸어놔서 항상 노드당 1개씩 유지된다. `replicas: 2`라 지금은 3대 중 2대(chan08, chan09)에만 있고 llm001은 비어있다 — anti-affinity는 "같은 노드에 몰리지 마라"는 규칙이지 "모든 노드에 하나씩 채워라"가 아니라서, replicas를 3으로 올리지 않는 한 세 번째 노드는 그냥 후보에서 빠진다.
 - coredns는 원래 기본값이 `preferredDuringScheduling`(권장, 강제 아님)이라 처음엔 우연히 둘 다 chan09에 몰려있었다 — chan09가 죽으면 클러스터 DNS가 통째로 끊기는 상태였다. `kubectl patch`로 `required`로 바꾸고 파드 하나를 지워서 강제로 재배치시켜 해결했다 (Deployment의 파드 템플릿을 바꿔도 이미 떠 있는 파드는 스스로 안 움직이므로, 최소 하나는 삭제해서 다시 뜨게 해야 새 규칙이 적용된다).
-- ingress-nginx-controller는 [`05-1-ingress.md`](../lessons/05-1-ingress.md)에서 처음부터 `required`로 만들었다.
+- ingress-nginx-controller는 [`04-1-ingress.md`](../lessons/04-1-ingress.md)에서 처음부터 `required`로 만들었다.
 
 ### 5. 임시 파드 — cm-acme-http-solver-*
 ```bash
@@ -331,9 +331,9 @@ Taint는 노드에 붙이는 "거부 딱지"다. `키=값:효과` 형태이고, 
 
 **taint/toleration은 "막기"만 하지 "끌어오기"는 못 한다.** toleration이 있다고 그 노드로 가는 게 아니라, 그냥 "거기도 갈 수 있는 후보"가 될 뿐이다. 특정 노드에 반드시 고정하려면 별도로 nodeSelector/nodeAffinity를 같이 써야 한다 — nvidia-device-plugin이 `nodeSelector: nvidia.com/gpu: "true"`로 GPU 노드에 고정되는 게 그 예.
 
-kubeadm은 컨트롤플레인 노드에 기본적으로 `node-role.kubernetes.io/control-plane:NoSchedule` taint를 건다(일반 파드가 못 올라오게). 우리도 처음엔 이걸 그대로 뒀다가, GPU 노드(llm001)에도 `nvidia.com/gpu=present:NoSchedule` taint를 걸어봤는데 — 노드가 3대뿐인 상황에서 컨트롤플레인 taint가 3대 전부에 붙어버리자 toleration 없는 일반 워크로드(cert-manager 등)가 클러스터 어디에도 못 뜨는 문제가 생겼다. 게다가 GPU taint는 애초에 불필요했다 — GPU 요청 파드는 `nvidia.com/gpu` 리소스를 가진 노드가 거기뿐이라 taint 없이도 자동으로 거기로만 갔기 때문. 결국 지금은 3대 다 taint를 없애고 완전 대칭으로 운영한다(자세한 경위는 [`06-llm-gpu-node.md`](../lessons/06-llm-gpu-node.md) 참고).
+kubeadm은 컨트롤플레인 노드에 기본적으로 `node-role.kubernetes.io/control-plane:NoSchedule` taint를 건다(일반 파드가 못 올라오게). 우리도 처음엔 이걸 그대로 뒀다가, GPU 노드(llm001)에도 `nvidia.com/gpu=present:NoSchedule` taint를 걸어봤는데 — 노드가 3대뿐인 상황에서 컨트롤플레인 taint가 3대 전부에 붙어버리자 toleration 없는 일반 워크로드(cert-manager 등)가 클러스터 어디에도 못 뜨는 문제가 생겼다. 게다가 GPU taint는 애초에 불필요했다 — GPU 요청 파드는 `nvidia.com/gpu` 리소스를 가진 노드가 거기뿐이라 taint 없이도 자동으로 거기로만 갔기 때문. 결국 지금은 3대 다 taint를 없애고 완전 대칭으로 운영한다(자세한 경위는 [`05-llm-gpu-node.md`](../lessons/05-llm-gpu-node.md) 참고).
 
-**taint만 보고 넘어가면 놓치는 것 — 컨트롤플레인 승격은 라벨도 하나 끼워 넣는다.** kubeadm이 노드를 컨트롤플레인으로 만들 때 taint와 별개로 `node.kubernetes.io/exclude-from-external-load-balancers` 라벨도 자동으로 붙인다("컨트롤플레인은 외부 로드밸런서 대상에서 빼라"는 표준 관례). taint는 스케줄링(파드 배치)에만 영향을 주지만, 이 라벨은 MetalLB 같은 LoadBalancer 구현체가 "이 노드는 VIP 공지 후보에서 제외"하는 데 쓴다 — 전혀 다른 메커니즘이라 taint를 다 지워도 이 라벨은 그대로 남는다. 물리 노드 3대가 전부 컨트롤플레인인 이 클러스터에서는 이 라벨이 3대 전부에 붙어버려 MetalLB가 ingress VIP를 아무도 공지 못 하는 사고로 이어졌다 — 실제 장애와 해결 과정은 [`06-llm-gpu-node.md`의 관련 알려진 이슈](../lessons/06-llm-gpu-node.md#컨트롤플레인-승격-시-붙는-exclude-from-external-load-balancers-라벨이-metallb-vip를-통째로-죽임) 참고.
+**taint만 보고 넘어가면 놓치는 것 — 컨트롤플레인 승격은 라벨도 하나 끼워 넣는다.** kubeadm이 노드를 컨트롤플레인으로 만들 때 taint와 별개로 `node.kubernetes.io/exclude-from-external-load-balancers` 라벨도 자동으로 붙인다("컨트롤플레인은 외부 로드밸런서 대상에서 빼라"는 표준 관례). taint는 스케줄링(파드 배치)에만 영향을 주지만, 이 라벨은 MetalLB 같은 LoadBalancer 구현체가 "이 노드는 VIP 공지 후보에서 제외"하는 데 쓴다 — 전혀 다른 메커니즘이라 taint를 다 지워도 이 라벨은 그대로 남는다. 물리 노드 3대가 전부 컨트롤플레인인 이 클러스터에서는 이 라벨이 3대 전부에 붙어버려 MetalLB가 ingress VIP를 아무도 공지 못 하는 사고로 이어졌다 — 실제 장애와 해결 과정은 [`05-llm-gpu-node.md`의 관련 알려진 이슈](../lessons/05-llm-gpu-node.md#컨트롤플레인-승격-시-붙는-exclude-from-external-load-balancers-라벨이-metallb-vip를-통째로-죽임) 참고.
 
 ### Affinity / Anti-affinity — "같이 뜨게" 또는 "따로 뜨게"
 파드를 어디에 스케줄할지에 대한 세밀한 규칙. Anti-affinity로 "같은 라벨을 가진 파드는 서로 다른 노드에 하나씩만" 강제해서, ingress-nginx 파드 2개가 각각 다른 노드에 뜨도록 만들었다(둘 다 chan09에 몰리는 걸 방지).

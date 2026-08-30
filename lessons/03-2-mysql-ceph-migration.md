@@ -83,7 +83,7 @@ kubectl -n mysql rollout status deployment/mysql --timeout=180s
 ```
 
 ### Service(MetalLB VIP) 노출
-- 설명: 기존 VIP를 MetalLB LoadBalancer Service로 재현한다. 전용 IPAddressPool(`mysql-pool`, 주소 1개짜리)을 따로 둬서 이 Service만 그 IP를 배타적으로 받게 했다 — [ingress](05-1-ingress.md#vip-대역-등록)처럼 공유 풀에 `loadBalancerIPs` annotation으로 못 박는 대신, "이 풀엔 이 IP 하나뿐"이라는 방식으로 같은 효과를 냈다. `externalTrafficPolicy: Local`이 필수인 이유는 아래 "알려진 이슈" 참고. 별도 스크립트 파일 없이 인터랙티브로 적용했다 — 재현 시 아래 매니페스트 그대로 사용.
+- 설명: 기존 VIP를 MetalLB LoadBalancer Service로 재현한다. 전용 IPAddressPool(`mysql-pool`, 주소 1개짜리)을 따로 둬서 이 Service만 그 IP를 배타적으로 받게 했다 — [ingress](04-1-ingress.md#vip-대역-등록)처럼 공유 풀에 `loadBalancerIPs` annotation으로 못 박는 대신, "이 풀엔 이 IP 하나뿐"이라는 방식으로 같은 효과를 냈다. `externalTrafficPolicy: Local`이 필수인 이유는 아래 "알려진 이슈" 참고. 별도 스크립트 파일 없이 인터랙티브로 적용했다 — 재현 시 아래 매니페스트 그대로 사용.
 ```yaml
 apiVersion: metallb.io/v1beta1
 kind: IPAddressPool

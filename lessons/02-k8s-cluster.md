@@ -4,7 +4,7 @@ chan08(컨트롤플레인) + chan09(워커), CNI는 Flannel. Kubernetes v1.36.4 
 
 ## 목적
 
-2노드 k8s 클러스터의 기본 골격을 만든다. 컨트롤플레인은 처음부터 keepalived VIP(10.5.5.3)를 공유 진입점(`controlPlaneEndpoint`)으로 잡고 시작한다. 지금은 그 VIP를 chan08 혼자 들고 있다 — "VIP 하나에 백엔드 하나"인 셈이다. 나중에 컨트롤플레인 노드가 늘어나도([`06-llm-gpu-node.md`](06-llm-gpu-node.md) 참고) 주소 체계를 바꿀 필요가 없다는 게 핵심이다. 왜 이 순서가 중요한지는 아래 "알려진 이슈: 고정 IP로 시작하면 나중에 힘들다"에 정리해뒀다.
+2노드 k8s 클러스터의 기본 골격을 만든다. 컨트롤플레인은 처음부터 keepalived VIP(10.5.5.3)를 공유 진입점(`controlPlaneEndpoint`)으로 잡고 시작한다. 지금은 그 VIP를 chan08 혼자 들고 있다 — "VIP 하나에 백엔드 하나"인 셈이다. 나중에 컨트롤플레인 노드가 늘어나도([`05-llm-gpu-node.md`](05-llm-gpu-node.md) 참고) 주소 체계를 바꿀 필요가 없다는 게 핵심이다. 왜 이 순서가 중요한지는 아래 "알려진 이슈: 고정 IP로 시작하면 나중에 힘들다"에 정리해뒀다.
 
 ## 스크립트 목록 (이름 순)
 
@@ -181,7 +181,7 @@ sudo ufw reload
 ```
 
 ### etcd 백업
-- 설명: 컨트롤플레인이 chan08 하나뿐이라 etcd도 단일 장애점이다. 주기적으로 스냅샷을 떠서 최소한 복구는 가능하게 한다. 아래 "알려진 이슈"에 나오듯 etcd 컨테이너 이미지가 최소 구성이라 `kubectl cp`를 못 쓰고, hostPath 볼륨을 통해 호스트에서 직접 꺼낸다. (이 단일 장애점 자체는 이후 [`06-llm-gpu-node.md`](06-llm-gpu-node.md)에서 3노드 쿼럼으로 해소한다.)
+- 설명: 컨트롤플레인이 chan08 하나뿐이라 etcd도 단일 장애점이다. 주기적으로 스냅샷을 떠서 최소한 복구는 가능하게 한다. 아래 "알려진 이슈"에 나오듯 etcd 컨테이너 이미지가 최소 구성이라 `kubectl cp`를 못 쓰고, hostPath 볼륨을 통해 호스트에서 직접 꺼낸다. (이 단일 장애점 자체는 이후 [`05-llm-gpu-node.md`](05-llm-gpu-node.md)에서 3노드 쿼럼으로 해소한다.)
 - 스크립트: [`09-etcd-backup.sh`](../scripts/02-k8s-cluster/09-etcd-backup.sh)
 ```bash
 # etcd 파드 안에서 스냅샷 생성 (hostPath 볼륨 /var/lib/etcd에 바로 씀)

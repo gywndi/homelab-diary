@@ -1,6 +1,6 @@
 # k8s 운영 명령 모음
 
-[`02-k8s-cluster.md`](02-k8s-cluster.md)/[`06-llm-gpu-node.md`](06-llm-gpu-node.md)로 구축한 3노드(chan08/chan09/llm001, 전부 컨트롤플레인+워커) 클러스터를 평소에 들여다보고 조작할 때 쓰는 명령들. 구축 절차가 아니라 "상태를 확인하고, 뭔가 이상할 때 원인을 좁히는" 용도. 애플리케이션별 운영은 각자 문서 참고 — [ingress](05-2-ingress-ops.md), [StarRocks](08-4-starrocks-ops.md), [Ceph](ops-ceph.md). kubeconfig는 chan08의 `~/.kube/config`(접속 주소 `https://k8s.home:6443`, VIP `10.5.5.3`). 아래 명령들의 systemctl/UFW/네트워크 기초는 [리눅스 기본 상식](ops-linux-basics.md) 참고.
+[`02-k8s-cluster.md`](02-k8s-cluster.md)/[`05-llm-gpu-node.md`](05-llm-gpu-node.md)로 구축한 3노드(chan08/chan09/llm001, 전부 컨트롤플레인+워커) 클러스터를 평소에 들여다보고 조작할 때 쓰는 명령들. 구축 절차가 아니라 "상태를 확인하고, 뭔가 이상할 때 원인을 좁히는" 용도. 애플리케이션별 운영은 각자 문서 참고 — [ingress](04-2-ingress-ops.md), [StarRocks](08-4-starrocks-ops.md), [Ceph](ops-ceph.md). kubeconfig는 chan08의 `~/.kube/config`(접속 주소 `https://k8s.home:6443`, VIP `10.5.5.3`). 아래 명령들의 systemctl/UFW/네트워크 기초는 [리눅스 기본 상식](ops-linux-basics.md) 참고.
 
 ## 클러스터/노드 상태
 
@@ -77,7 +77,7 @@ kubectl drain chan09 --ignore-daemonsets --delete-emptydir-data
 # 정비 끝나면 스케줄 재개
 kubectl uncordon chan09
 ```
-이 클러스터는 노드 3대 전부가 컨트롤플레인 겸 워커라([`06-llm-gpu-node.md`](06-llm-gpu-node.md) 참고), 한 노드를 drain하면 워크로드가 나머지 2대에만 몰린다. etcd 쿼럼(과반수 2/3)은 drain과 무관하게 그 노드의 etcd 프로세스가 살아있는 한 유지된다 — drain은 kubelet이 관리하는 파드만 옮기지, static pod로 뜨는 etcd/apiserver 자체를 내리지 않는다.
+이 클러스터는 노드 3대 전부가 컨트롤플레인 겸 워커라([`05-llm-gpu-node.md`](05-llm-gpu-node.md) 참고), 한 노드를 drain하면 워크로드가 나머지 2대에만 몰린다. etcd 쿼럼(과반수 2/3)은 drain과 무관하게 그 노드의 etcd 프로세스가 살아있는 한 유지된다 — drain은 kubelet이 관리하는 파드만 옮기지, static pod로 뜨는 etcd/apiserver 자체를 내리지 않는다.
 
 ## API 서버 VIP (keepalived)
 
@@ -166,7 +166,7 @@ ssh 10.5.5.10 nvidia-smi
 
 ## 방화벽(UFW)이 원인일 때
 
-k8s 트래픽이 막히는 문제의 상당수는 UFW 쪽이다([`02-k8s-cluster.md`](02-k8s-cluster.md#알려진-이슈-ufw가-pod-네트워크를-막음), [`05-1-ingress.md`](05-1-ingress.md#알려진-이슈) 참고).
+k8s 트래픽이 막히는 문제의 상당수는 UFW 쪽이다([`02-k8s-cluster.md`](02-k8s-cluster.md#알려진-이슈-ufw가-pod-네트워크를-막음), [`04-1-ingress.md`](04-1-ingress.md#알려진-이슈) 참고).
 
 ```bash
 # 현재 규칙 전체
@@ -198,5 +198,5 @@ sudo kubeadm init phase upload-certs --upload-certs   # --control-plane join 시
 - **`kubectl`이 응답 없음**: VIP(`10.5.5.3`)가 어느 노드에도 없는지 확인(`ip -4 addr show | grep 10.5.5.3`, 위 "API 서버 VIP" 참고) — 3노드 전부에서 keepalived가 죽어있으면 apiserver 자체는 살아있어도 VIP로는 접속이 안 된다. IP 대신 각 노드의 로컬 apiserver(`https://<노드 IP>:6443`)로 직접 붙어서 우회 확인 가능.
 - **파드가 새 ConfigMap/Secret 내용을 못 읽음**: k8s는 마운트된 ConfigMap을 자동으로 재로드하지만 애플리케이션 프로세스가 파일 변경을 감지 못 하는 경우가 흔하다 — `rollout restart`로 강제 재기동.
 - **PVC가 계속 `Pending`**: `kubectl describe pvc <name>`의 Events. ceph-csi 쪽 문제면 `kubectl -n ceph-csi get pods`로 csi 플러그인이 떠 있는지, `cephadm shell -- ceph -s`로 Ceph 클러스터 자체가 HEALTH_OK인지 먼저 확인([ops-ceph.md](ops-ceph.md) 참고).
-- **컨트롤플레인 노드에 새로 뜬 파드가 API 서버에 못 붙음**: same-node hairpin이 UFW에 막히는 문제일 수 있다 — [`05-1-ingress.md`의 관련 알려진 이슈](05-1-ingress.md#알려진-이슈) 참고.
-- **LoadBalancer(MetalLB) VIP가 아무도 응답 안 함**: 노드에 `node.kubernetes.io/exclude-from-external-load-balancers` 라벨이 붙어있으면 MetalLB가 그 노드를 광고 후보에서 제외한다 — 컨트롤플레인 승격 직후 자주 놓치는 부분. [`06-llm-gpu-node.md`의 관련 알려진 이슈](06-llm-gpu-node.md#컨트롤플레인-승격-시-붙는-exclude-from-external-load-balancers-라벨이-metallb-vip를-통째로-죽임) 참고.
+- **컨트롤플레인 노드에 새로 뜬 파드가 API 서버에 못 붙음**: same-node hairpin이 UFW에 막히는 문제일 수 있다 — [`04-1-ingress.md`의 관련 알려진 이슈](04-1-ingress.md#알려진-이슈) 참고.
+- **LoadBalancer(MetalLB) VIP가 아무도 응답 안 함**: 노드에 `node.kubernetes.io/exclude-from-external-load-balancers` 라벨이 붙어있으면 MetalLB가 그 노드를 광고 후보에서 제외한다 — 컨트롤플레인 승격 직후 자주 놓치는 부분. [`05-llm-gpu-node.md`의 관련 알려진 이슈](05-llm-gpu-node.md#컨트롤플레인-승격-시-붙는-exclude-from-external-load-balancers-라벨이-metallb-vip를-통째로-죽임) 참고.
