@@ -1,7 +1,5 @@
 # MySQL을 Ceph RBD로 재배포
 
-[← 이전: MySQL active/standby](03-1-mysql-ha.md) · [다음: Ingress + 인증서 →](04-1-ingress.md)
-
 [Stage 1(chan08/chan09 keepalived 페일오버)](03-1-mysql-ha.md)을 대체했다. 이제 단일 mysqld가 k8s Deployment + Ceph RBD PVC 위에서 돈다. 스토리지 배경은 [Ceph 스토리지](07-1-ceph-storage.md) 참고.
 
 > VIP는 이 문서에 적힌 `10.5.5.4`에서 2026-08-29에 옮겨졌다(애플리케이션 VIP 대역 정책 적용). 지금은 IP를 직접 쓰지 않고 **`mysql.k8s.home`** 도메인으로 접속한다 — [내부 DNS](09-internal-dns.md) 참고. VIP가 다시 바뀌어도 이 도메인만 갱신하면 된다.
@@ -166,3 +164,7 @@ mysql -h mysql.k8s.home -u <애플리케이션 계정> -p -e "SELECT 1;"
 | 95th 지연(가장 느린 5%를 뺀 체감 최대 지연) | 137.35ms | 99.33ms | -28% |
 
 튜닝 내용은 `innodb_flush_log_at_trx_commit=2`(위 ConfigMap 참고) + semi-sync 잔재 제거다. 1GbE 위에서 매 커밋마다 fsync를 강제하면 RBD 3-replica 전체 ack를 매번 기다려야 한다. 이 병목의 근본 원인(1GbE 네트워크)은 [Ceph 벤치마크](07-2-ceph-storage-bmt.md) 참고.
+
+---
+
+[← 이전: MySQL active/standby](03-1-mysql-ha.md) · [다음: Ingress + 인증서 →](04-1-ingress.md)

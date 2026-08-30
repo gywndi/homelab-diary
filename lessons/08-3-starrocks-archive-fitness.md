@@ -1,7 +1,5 @@
 # StarRocks를 MySQL 콜드 데이터 장기보관처로 쓸 수 있는가
 
-[← 이전: StarRocks 벤치마크](08-2-starrocks-analytics-bmt.md) · [다음: StarRocks 운영 →](08-4-starrocks-ops.md)
-
 배경은 [StarRocks 분석 엔진](08-1-starrocks-analytics.md), 클러스터 성능 확장 검증은 [BMT](08-2-starrocks-analytics-bmt.md) 참고.
 
 ## 배경
@@ -220,3 +218,7 @@ ORDER BY id LIMIT 50;
 4. `SHOW DATA;`로 압축 후 저장 크기 확인. 위 쿼리들은 `SELECT NOW(6)` 감싸지 않고 클라이언트 벽시계 시간으로 측정했다(단발 실행, 반복 통계는 아직 안 냄).
 
 > 1번의 TSV 생성 스크립트는 저장소에 커밋되지 않았다. 2026-08-30 Ceph 재구성으로 이 데이터셋 자체는 삭제됐고, 지금은 재현할 수 없다 — 위 실측 결과는 그 시점의 기록으로만 남는다.
+
+---
+
+[← 이전: StarRocks 벤치마크](08-2-starrocks-analytics-bmt.md) · [다음: StarRocks 운영 →](08-4-starrocks-ops.md)

@@ -1,7 +1,5 @@
 # Ceph 스토리지 벤치마크
 
-[← 이전: Ceph 스토리지](07-1-ceph-storage.md) · [다음: StarRocks 분석 엔진 →](08-1-starrocks-analytics.md)
-
 설계는 [Ceph 스토리지](07-1-ceph-storage.md) 참고. RBD 자체가 실사용 가능한 성능인지 측정했다.
 
 ## 핵심 결론
@@ -41,3 +39,7 @@ size=3 replication 쓰기는 클라이언트→primary OSD로 들어온다. 그�
 - 읽기: `rados bench -p rbd-pool 30 seq` / `rados bench -p rbd-pool 30 rand`
 - 네트워크 링크: 한쪽에서 `iperf3 -s`, 다른쪽에서 `iperf3 -c <서버 IP>`
 - OSD 지연: `ceph osd perf`
+
+---
+
+[← 이전: Ceph 스토리지](07-1-ceph-storage.md) · [다음: StarRocks 분석 엔진 →](08-1-starrocks-analytics.md)

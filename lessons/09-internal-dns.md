@@ -1,7 +1,5 @@
 # 내부 도메인 DNS (CoreDNS)
 
-[← 이전: StarRocks 운영](08-4-starrocks-ops.md)
-
 LAN 안에서 서비스 VIP를 IP 대신 `k8s.home` 같은 이름으로 접속할 수 있게 하는 내부 전용 DNS 서버다. `internal-dns` 네임스페이스에 CoreDNS를 띄웠다.
 
 ## 목적
@@ -193,3 +191,7 @@ kubectl run dns-test --rm -i --restart=Never --image=busybox:1.36 --command -- n
 # 물리 노드 3대에서는 CoreDNS가 죽어도 /etc/hosts로 인프라 도메인이 그대로 풀린다
 getent hosts k8s.home
 ```
+
+---
+
+[← 이전: StarRocks 운영](08-4-starrocks-ops.md)

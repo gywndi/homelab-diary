@@ -1,7 +1,5 @@
 # Ingress + 인증서 운영 명령 모음
 
-[← 이전: Ingress + 인증서](04-1-ingress.md) · [다음: LLM GPU 노드 →](05-llm-gpu-node.md)
-
 [`04-1-ingress.md`](04-1-ingress.md)로 구축한 뒤 실제 운영하면서 반복적으로 쓰는 명령들. 구축 절차가 아니라 "평소에 확인하고, 뭔가 이상할 때 들여다보는" 용도.
 
 ## 전체 상태 한눈에 보기
@@ -83,3 +81,7 @@ kubectl -n ingress-nginx annotate svc ingress-nginx-controller \
 - **502/504가 뜸**: 백엔드(EndpointSlice에 등록한 외부 IP:포트)가 살아있는지 직접 `curl`로 확인. Ingress가 가리키는 Service 이름/포트가 실제 EndpointSlice와 일치하는지도 확인.
 - **인증서가 계속 pending**: `kubectl describe challenge`의 Reason을 본다. `no such host`면 DNS 미설정, `connection refused`/`timeout`이면 라우터 포트포워딩이나 방화벽 문제.
 - **새로 스케줄된 파드가 이상하게 API 서버에 못 붙음**: 컨트롤플레인 노드에 파드가 새로 뜬 경우라면 [`04-1-ingress.md`의 "컨트롤플레인 파드-호스트 방화벽 수정"](04-1-ingress.md#알려진-이슈) 문제일 수 있다. `sudo journalctl -k | grep 'UFW BLOCK'`으로 확인.
+
+---
+
+[← 이전: Ingress + 인증서](04-1-ingress.md) · [다음: LLM GPU 노드 →](05-llm-gpu-node.md)

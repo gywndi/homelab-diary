@@ -1,7 +1,5 @@
 # MySQL active/standby (Stage 1)
 
-[← 이전: Kubernetes 클러스터](02-k8s-cluster.md) · [다음: MySQL → Ceph RBD →](03-2-mysql-ceph-migration.md)
-
 > 이 구성은 이후 [Ceph RBD 기반 재배포](03-2-mysql-ceph-migration.md)로 대체됐다. 이 문서는 그 이전(Stage 1) 아키텍처 기록으로 남겨둔다.
 
 chan08(source) ↔ chan09(replica), semi-sync 복제, keepalived VIP `10.5.5.4`로 페일오버.
@@ -225,3 +223,7 @@ sudo mysql -e "SHOW STATUS LIKE 'Rpl_semi_sync%';"
 # VIP 위치
 ip -4 addr show enp1s0 | grep 10.5.5.4
 ```
+
+---
+
+[← 이전: Kubernetes 클러스터](02-k8s-cluster.md) · [다음: MySQL → Ceph RBD →](03-2-mysql-ceph-migration.md)

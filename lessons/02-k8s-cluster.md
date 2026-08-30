@@ -1,7 +1,5 @@
 # Kubernetes 클러스터 구축 (Stage 1, 2노드)
 
-[← 이전: 서버 초기 프로비저닝](01-provision.md) · [다음: MySQL active/standby →](03-1-mysql-ha.md)
-
 chan08(컨트롤플레인) + chan09(워커), CNI는 Flannel. Kubernetes v1.36.4 (dl.k8s.io stable 채널 기준 자동 선택).
 
 ## 목적
@@ -279,3 +277,7 @@ kubectl delete pod dns-test
 ```
 
 kubeconfig는 chan08의 `~/.kube/config`에 있음 (작업 계정용, `kubectl`은 chan08에서 바로 사용 가능, 접속 주소는 VIP 10.5.5.3).
+
+---
+
+[← 이전: 서버 초기 프로비저닝](01-provision.md) · [다음: MySQL active/standby →](03-1-mysql-ha.md)

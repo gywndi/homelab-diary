@@ -1,7 +1,5 @@
 # Ceph 스토리지 (RBD/RGW)
 
-[← 이전: KVM 인프라](06-kvm.md) · [다음: Ceph 벤치마크 →](07-2-ceph-storage-bmt.md)
-
 3노드(chan08/chan09/llm001) 전체를 재구성해서 만든 공용 스토리지 계층이다. Ceph는 여러 서버의 디스크를 묶어서 네트워크로 복제되는 하나의 스토리지 풀로 만들어주는 분산 스토리지 시스템이다. 배포·운영은 cephadm이 맡는다. cephadm은 Ceph 공식 배포 도구로, 각 노드에 컨테이너(podman)+systemd 유닛으로 데몬을 직접 띄운다 — k8s API/스케줄러와 무관하게 동작한다. RBD(블록)는 MySQL/KVM이 쓴다. RGW(오브젝트, S3 API)는 오브젝트 API가 필요한 다른 워크로드가 쓴다. 새 장비 없이 기존 노드를 재구성하는 것만으로 진행했다.
 
 ## 목적
@@ -322,3 +320,7 @@ cephadm shell -- ceph orch ps   # 데몬(mon/mgr/osd/rgw) 배치 현황
 3. krbd 매핑 실제 테스트(`/dev/rbd0` 생성) + k8s 파드에서 ceph-csi PVC 마운트·쓰기·읽기 확인
 4. MySQL을 새 `ceph-csi-rbd` StorageClass로 재배포, 원본 백업(mysqldump) 전체 복원 후 정확한 행 수로 데이터 무결성 확인
 5. StarRocks shared-data(FE+CN, RGW 기반)·shared-nothing(FE+BE3, 로컬 XFS 기반) 양쪽 클러스터 재배포, 테이블 생성/쓰기/조회로 end-to-end 확인(RGW 버킷 오브젝트 수 증가로 실제 저장 확인)
+
+---
+
+[← 이전: KVM 인프라](06-kvm.md) · [다음: Ceph 벤치마크 →](07-2-ceph-storage-bmt.md)

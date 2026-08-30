@@ -1,7 +1,5 @@
 # StarRocks 개념 정리
 
-[← 이전: Ceph 개념](02-ceph.md)
-
 StarRocks를 처음부터 배우면서 [분석 엔진](../lessons/08-1-starrocks-analytics.md)을 만들었다. 새 개념이 필요해질 때마다 여기 추가한다 — 교과서적 정의보다 "우리 클러스터에서 실제로 이게 왜 필요했는지"를 우선한다. 배포 절차 자체는 [StarRocks 분석 엔진](../lessons/08-1-starrocks-analytics.md) 참고.
 
 ## 전체 구조
@@ -170,3 +168,7 @@ mysql -h 127.0.0.1 -P 9030 -u root -e 'ALTER SYSTEM ADD BACKEND "be:9050";'
 ```
 
 k8s 배포에서 headless Service로 고정 hostname을 만들어준 것과 같은 이유로, BE를 등록할 때 컨테이너 이름(`be`)을 그대로 쓴다 — IP로 등록하면 컨테이너가 재시작될 때마다 깨진다는 원칙은 로컬 환경에서도 똑같다. shared-data(RGW/S3)를 테스트하려면 `fe.conf`에 `run_mode=shared_data`와 `aws_s3_*` 설정을 추가해야 한다 — 자세한 설정 항목은 [분석 엔진의 fe.conf.template](../scripts/08-starrocks/fe.conf.template) 참고.
+
+---
+
+[← 이전: Ceph 개념](02-ceph.md)

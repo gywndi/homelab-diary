@@ -1,7 +1,5 @@
 # LLM GPU 노드 추가 (2노드 → 3노드, 컨트롤플레인 HA)
 
-[← 이전: Ingress 운영](04-2-ingress-ops.md) · [다음: KVM 인프라 →](06-kvm.md)
-
 기존에 별도 용도로 쓰던 GPU 머신을 k8s 클러스터에 컨트롤플레인 겸 워커로 편입시켰다. 물리 노드가 2대에서 3대가 되면서, 그동안 단일 장애점이었던 etcd/컨트롤플레인도 이 참에 실제 쿼럼(3)을 갖춘 구성으로 바꿨다.
 
 ## 목적
@@ -243,3 +241,7 @@ kubectl run gpu-test --rm -it --restart=Never --image=nvidia/cuda:12.6.0-base-ub
 # 컨트롤플레인 taint/exclude-from-external-load-balancers 라벨이 전부 제거된 상태인지 (위 "알려진 이슈" 참고)
 kubectl get nodes -o json | jq '.items[] | {name:.metadata.name, taints:.spec.taints, excludeLabel:.metadata.labels."node.kubernetes.io/exclude-from-external-load-balancers"}'
 ```
+
+---
+
+[← 이전: Ingress 운영](04-2-ingress-ops.md) · [다음: KVM 인프라 →](06-kvm.md)

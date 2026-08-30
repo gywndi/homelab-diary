@@ -1,7 +1,5 @@
 # StarRocks 분석 엔진 벤치마크 (shared-nothing vs shared-data)
 
-[← 이전: StarRocks 분석 엔진](08-1-starrocks-analytics.md) · [다음: StarRocks 아카이브 적합성 →](08-3-starrocks-archive-fitness.md)
-
 설계는 [StarRocks 분석 엔진](08-1-starrocks-analytics.md) 참고. `starrocks-sn`(FE+BE, 로컬 XFS)과 `starrocks`(FE+CN, Ceph RGW) 두 클러스터를 같은 스키마/쿼리로 비교했다. RGW(RADOS Gateway)는 Ceph가 제공하는 S3 호환 오브젝트 스토리지 API다 — 자세한 내용은 [Ceph 스토리지](07-1-ceph-storage.md) 참고. 아래에서 "RGW"는 곧 shared-data 클러스터가 데이터를 저장하는 네트워크 스토리지를 가리킨다.
 
 ## 핵심 결론
@@ -159,3 +157,7 @@ ALTER SYSTEM DROP COMPUTE NODE "...";
 kubectl -n starrocks patch deployment fe --type=json \
   -p='[{"op":"add","path":"/spec/template/spec/nodeSelector","value":{"kubernetes.io/hostname":"llm001"}}]'
 ```
+
+---
+
+[← 이전: StarRocks 분석 엔진](08-1-starrocks-analytics.md) · [다음: StarRocks 아카이브 적합성 →](08-3-starrocks-archive-fitness.md)

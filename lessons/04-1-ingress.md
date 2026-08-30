@@ -1,7 +1,5 @@
 # Ingress + 인증서 자동화 (MetalLB + ingress-nginx + cert-manager)
 
-[← 이전: MySQL → Ceph RBD](03-2-mysql-ceph-migration.md) · [다음: Ingress 운영 →](04-2-ingress-ops.md)
-
 2노드 클러스터에 외부 도메인을 라우팅하는 Ingress 계층을 올리고, Let's Encrypt 인증서 발급/갱신을 자동화한다. 기존에 별도 서버에서 nginx로 처리하던 도메인 라우팅과 인증서 발급 기능을 이 클러스터로 이전했다.
 
 ## 목적
@@ -197,3 +195,7 @@ kubectl get certificate
 curl -sk -o /dev/null -w '%{http_code}\n' https://<등록한 도메인>/
 ```
 build 직후 인증서가 아직 `Issuing` 상태일 수 있다 — HTTP-01 챌린지(도메인 검증) + 실제 발급까지 수십 초에서 수 분 걸린다. 계속 `False`로 멈춰있으면 `kubectl describe challenge`로 원인을 본다(위 "알려진 이슈" 참고). 평소 운영 중 반복적으로 쓰는 명령은 [`04-2-ingress-ops.md`](04-2-ingress-ops.md) 참고.
+
+---
+
+[← 이전: MySQL → Ceph RBD](03-2-mysql-ceph-migration.md) · [다음: Ingress 운영 →](04-2-ingress-ops.md)

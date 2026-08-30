@@ -1,7 +1,5 @@
 # Ceph 개념 정리
 
-[← 이전: Kubernetes 개념](01-kubernetes.md) · [다음: StarRocks 개념 →](03-starrocks.md)
-
 Ceph를 처음부터 배우면서 이 스토리지 계층을 만들었다. 새 개념이 필요해질 때마다 여기 추가한다 — 교과서적 정의보다 "우리 클러스터에서 실제로 이게 왜 필요했는지"를 우선한다. 배포 절차 자체는 [Ceph 스토리지](../lessons/07-1-ceph-storage.md) 참고.
 
 ## 전체 구조
@@ -117,3 +115,7 @@ sudo cephadm shell -- ceph orch apply rgw starrocks-store --placement="chan08,ch
 ```
 
 이 명령 하나로 3노드에 RGW 데몬이 뜬다. k8s의 Deployment/DaemonSet과 비슷한 선언적 모델이지만, k8s API 서버나 스케줄러와는 완전히 무관하게 동작한다 — Ceph가 k8s 안에 있지 않고 베어메탈에 독립적으로 떠 있어야 하는 이유(스토리지가 k8s 생사에 안 묶여야 함)와 맞닿아 있다.
+
+---
+
+[← 이전: Kubernetes 개념](01-kubernetes.md) · [다음: StarRocks 개념 →](03-starrocks.md)

@@ -1,7 +1,5 @@
 # 서버 초기 프로비저닝
 
-[다음: Kubernetes 클러스터 →](02-k8s-cluster.md)
-
 우분투를 새로 설치한 k8s 클러스터 후보 노드 2대의 기본 설정 스크립트 모음.
 
 ## 목적
@@ -182,3 +180,7 @@ EOF
 2. sudoers NOPASSWD 적용
 3. [`02-system-update.sh`](../scripts/01-provision/02-system-update.sh) → [`03-timezone.sh`](../scripts/01-provision/03-timezone.sh) → [`04-firewall.sh`](../scripts/01-provision/04-firewall.sh) → [`01-format-mount-data.sh`](../scripts/01-provision/01-format-mount-data.sh) 순 실행
 4. 커널 업데이트로 인한 재부팅 수행, 재부팅 후 타임존/방화벽/`/data` 마운트/sudo 모두 정상 유지 확인
+
+---
+
+[다음: Kubernetes 클러스터 →](02-k8s-cluster.md)

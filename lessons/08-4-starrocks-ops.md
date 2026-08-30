@@ -1,7 +1,5 @@
 # StarRocks 운영 명령 모음
 
-[← 이전: StarRocks 아카이브 적합성](08-3-starrocks-archive-fitness.md) · [다음: 내부 도메인 DNS →](09-internal-dns.md)
-
 [`08-1-starrocks-analytics.md`](08-1-starrocks-analytics.md)로 구축한 뒤 실제 쓰면서 반복적으로 쓰는 SQL/명령들. 구축 절차가 아니라 "테이블 만들 때, 데이터 넣을 때, 상태 확인할 때" 참고하는 용도. 전부 `mysql -h fe.starrocks.svc.cluster.local -P 9030 -u root` 클라이언트로 실행한다(비밀번호 없음, 기본 상태).
 
 ## 테이블 생성
@@ -162,3 +160,7 @@ FE가 여러 대(Follower/Observer 포함)면 한 번에 하나씩만 재시작�
 - **`STREAM LOAD`가 타임아웃/실패**: FE의 8030 HTTP 포트로 보낸 요청이 실제 담당 BE/CN으로 리다이렉트되는데, 그 BE/CN이 죽어있으면 실패한다 — `SHOW BACKENDS\G`/`SHOW COMPUTE NODES\G`로 대상 노드가 Alive인지 먼저 확인.
 - **첫 테이블 생성이 오래 걸리다 실패**: cloud-native(shared_data) 모드는 콜드 스타트 시 첫 태블릿 생성이 60~300초 걸릴 수 있다 — `tablet_create_timeout_second` 기본값(10초)이 너무 짧아서 실패했다면 `fe.conf`에서 늘렸는지 확인.
 - **쿼리가 느린데 이유를 모르겠음**: `EXPLAIN <쿼리>`로 실행 계획을 먼저 본다. cloud-native 테이블은 `datacache.enable` 여부에 따라 첫 조회와 캐시 히트 후 성능 차이가 크다 — [concepts/03-starrocks.md](../concepts/03-starrocks.md) 참고.
+
+---
+
+[← 이전: StarRocks 아카이브 적합성](08-3-starrocks-archive-fitness.md) · [다음: 내부 도메인 DNS →](09-internal-dns.md)
