@@ -24,7 +24,7 @@
    - 문서 [바로가기](lessons/05-llm-gpu-node.md) · 스크립트 [바로가기](scripts/05-llm-gpu-node/)
 6. KVM 하이퍼바이저 인프라
    - k8s와 무관한 별도 가상화 기반 (컨테이너화가 어려운 워크로드용)
-   - 문서 [바로가기](lessons/06-kvm.md) · 스크립트 [바로가기](scripts/06-kvm/)
+   - 문서 [바로가기](lessons/06-1-kvm.md) · 스크립트 [바로가기](scripts/06-kvm/)
 7. Ceph 스토리지 (RBD/RGW)
    - 3노드 재구성, cephadm으로 베어메탈 배포(k8s와 무관하게 독립 운영)
    - 문서 [바로가기](lessons/07-1-ceph-storage.md) · 벤치마크 [바로가기](lessons/07-2-ceph-storage-bmt.md) · 스크립트 [바로가기](scripts/07-ceph-storage/)

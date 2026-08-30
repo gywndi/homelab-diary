@@ -323,4 +323,4 @@ cephadm shell -- ceph orch ps   # 데몬(mon/mgr/osd/rgw) 배치 현황
 
 ---
 
-[← 이전: KVM 인프라](06-kvm.md) · [다음: Ceph 벤치마크 →](07-2-ceph-storage-bmt.md)
+[← 이전: KVM 인프라](06-1-kvm.md) · [다음: Ceph 벤치마크 →](07-2-ceph-storage-bmt.md)

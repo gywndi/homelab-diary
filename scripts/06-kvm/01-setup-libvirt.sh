@@ -1,7 +1,7 @@
 #!/bin/bash
-# KVM/libvirt 하이퍼바이저 인프라 준비 (실제 VM은 생성하지 않음)
+# KVM/libvirt 하이퍼바이저 인프라 준비
 #
-# 사용법: sudo ./01-setup-libvirt.sh (양쪽 노드 모두 실행)
+# 사용법: sudo ./01-setup-libvirt.sh (3노드 전부 실행)
 
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
@@ -20,13 +20,16 @@ usermod -aG libvirt,kvm "$TARGET_USER"
 echo "== libvirtd 활성화 =="
 systemctl enable --now libvirtd
 
-echo "== /data/vms storage pool 등록 =="
-mkdir -p /data/vms
-if ! virsh pool-info data-pool >/dev/null 2>&1; then
-  virsh pool-define-as data-pool dir --target /data/vms
-  virsh pool-build data-pool
-  virsh pool-start data-pool
-  virsh pool-autostart data-pool
+echo "== vm-pool storage pool 등록 (07-ceph-storage의 XFS 파티션 위) =="
+# /data/vms는 더 이상 없다 — Ceph 도입 과정에서 디스크가 재분할되며 사라졌다.
+# 남은 로컬 XFS 파티션(/mnt/starrocks-be, StarRocks shared-nothing과 공유)의
+# 여유 공간을 그대로 쓴다. lessons/06-1-kvm.md "알려진 이슈" 참고.
+mkdir -p /mnt/starrocks-be/vm-disks
+if ! virsh pool-info vm-pool >/dev/null 2>&1; then
+  virsh pool-define-as vm-pool dir --target /mnt/starrocks-be/vm-disks
+  virsh pool-build vm-pool
+  virsh pool-start vm-pool
+  virsh pool-autostart vm-pool
 fi
 
 echo "== ${TARGET_USER} 계정 기본 libvirt URI를 qemu:///system으로 고정 =="
@@ -43,4 +46,4 @@ virsh list --all
 virsh pool-list --all
 lsmod | grep kvm
 
-echo "완료: KVM/libvirt 인프라 준비 (VM은 생성하지 않음)"
+echo "완료: KVM/libvirt 인프라 준비"
