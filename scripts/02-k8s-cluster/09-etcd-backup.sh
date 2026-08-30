@@ -10,6 +10,10 @@
 # 못 쓴다. 대신 etcd 파드의 hostPath 볼륨(/var/lib/etcd, 호스트와 그대로
 # 매핑됨)에 스냅샷을 떠서 호스트 쪽에서 직접 꺼내는 방식을 쓴다.
 #
+# 로컬(BACKUP_DIR)에 남기는 동시에 NAS(/mnt/nas-backup)에도 복사한다 —
+# chan08 자체가 죽는 상황(디스크 고장 등)에서는 로컬 백업도 같이 사라지므로,
+# 로컬은 "빠른 복구용", NAS는 "노드 자체가 죽어도 살아남는 사본" 역할을 나눠 맡는다.
+#
 # 사용법: ./09-etcd-backup.sh [보관 개수, 기본 7]
 #   ./09-etcd-backup.sh
 #   ./09-etcd-backup.sh 14
@@ -18,6 +22,8 @@ set -euo pipefail
 
 KEEP="${1:-7}"
 BACKUP_DIR="/data/etcd-backup"
+NAS_MOUNT="/mnt/nas-backup"
+NAS_BACKUP_DIR="${NAS_MOUNT}/k8s/backups/etcd-backup"
 TIMESTAMP="$(date +%Y%m%d%H%M%S)"
 SNAPSHOT_NAME="etcd-snapshot-${TIMESTAMP}.db"
 POD_TMP_PATH="/var/lib/etcd/etcd-backup-tmp.db"
@@ -43,6 +49,15 @@ chmod 600 "${BACKUP_DIR}/${SNAPSHOT_NAME}"
 
 echo "== 오래된 백업 정리 (최근 ${KEEP}개만 유지) =="
 ls -1t "${BACKUP_DIR}"/etcd-snapshot-*.db | tail -n +"$((KEEP + 1))" | xargs -r rm -v --
+
+echo "== NAS로 복사 (마운트 안 돼 있으면 건너뛰고 경고만) =="
+if mountpoint -q "$NAS_MOUNT" 2>/dev/null; then
+  mkdir -p "$NAS_BACKUP_DIR"
+  cp "${BACKUP_DIR}/${SNAPSHOT_NAME}" "$NAS_BACKUP_DIR/"
+  ls -1t "${NAS_BACKUP_DIR}"/etcd-snapshot-*.db | tail -n +"$((KEEP + 1))" | xargs -r rm -v --
+else
+  echo "경고: /mnt/nas-backup이 마운트돼 있지 않음 — NAS 복사 건너뜀" >&2
+fi
 
 echo "== 현재 보관 중인 백업 =="
 ls -lh "${BACKUP_DIR}"

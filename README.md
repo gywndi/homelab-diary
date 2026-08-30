@@ -34,6 +34,9 @@
 9. 내부 도메인 DNS (CoreDNS)
    - LAN·k8s 파드 양쪽에서 `k8s.home`/`ceph.home` 같은 이름으로 서비스 VIP 접속
    - 문서 [바로가기](lessons/09-internal-dns.md)
+10. NAS 연동 (RWX 스토리지 + 백업 타깃)
+    - NFS CSI로 k8s RWX 스토리지 제공, chan08 백업(etcd/MySQL)의 오프노드 사본
+    - 문서 [바로가기](lessons/10-nas-storage.md) · 스크립트 [바로가기](scripts/10-nas-storage/)
 
 ## 운영 명령 모음
 
