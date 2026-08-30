@@ -122,6 +122,26 @@ sudo chmod 0440 /etc/sudoers.d/90-chan-nopasswd
 sudo visudo -c
 ```
 
+### 핵심 인프라 노드 /etc/hosts 등록
+- 설명: chan08/chan09/llm001(=CoreDNS를 갱신·재기동할 수도 있는 노드)에 내부 도메인을 `/etc/hosts`로도 박아둔다. DNS(CoreDNS) 자체가 흔들릴 때 이 3대가 도메인으로 서로 접근 못 하는 닭-달걀 문제를 막는 안전망. 도메인 등록의 전체 그림(CoreDNS `hosts` 플러그인, k8s stub-domain 등)은 [내부 DNS](09-internal-dns.md) 문서 참고 — 이 스크립트는 그중 "DHCP로 못 받는 3대의 정적 안전망" 부분만 담당한다.
+- 스크립트: [`06-hosts-static-entries.sh`](../scripts/01-provision/06-hosts-static-entries.sh)
+```bash
+# 재실행해도 중복 안 되게 기존 마킹 블록 제거 후 재추가
+sudo sed -i '/^# BEGIN homelab-infra-hosts$/,/^# END homelab-infra-hosts$/d' /etc/hosts
+
+cat <<'EOF' | sudo tee -a /etc/hosts
+# BEGIN homelab-infra-hosts
+10.5.5.2 dns.home
+10.5.5.3 k8s.home
+10.5.5.4 ceph.home
+10.5.5.5 nas.home
+10.5.5.8 chan08.home
+10.5.5.9 chan09.home
+10.5.5.10 llm001.home
+# END homelab-infra-hosts
+EOF
+```
+
 ## 방화벽 정책 ([`04-firewall.sh`](../scripts/01-provision/04-firewall.sh))
 
 기본 정책: **인바운드 전체 차단**, 아웃바운드 전체 허용. 인바운드는 내부 대역 `10.5.5.0/24`에서만 아래 포트를 허용한다.

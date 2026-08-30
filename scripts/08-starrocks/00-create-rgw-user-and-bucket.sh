@@ -9,7 +9,7 @@
 set -euo pipefail
 
 BUCKET="starrocks-storage"
-RGW_ENDPOINT_HOST="10.5.5.4"   # RGW VIP(ceph.home) — internal/ip-inventory.md 확인
+RGW_ENDPOINT_HOST="ceph.home"   # RGW VIP(ceph.home) — internal/ip-inventory.md 확인
 RGW_ENDPOINT_PORT="7480"
 
 echo "== RGW 유저 생성 (이미 있으면 기존 키 재사용) =="
