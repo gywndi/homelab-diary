@@ -128,3 +128,35 @@ ALTER SYSTEM ADD OBSERVER "fe-obs1-0.fe-obs1-hl.starrocks.svc.cluster.local:9010
 ```
 
 FE/BE/CN 전부 headless Service의 고정 hostname으로 등록한다 — IP로 등록하면 파드가 재시작될 때마다 깨진다. Follower/Observer 차이는 [concepts/starrocks.md](../concepts/starrocks.md#fe-확장-follower-vs-observer) 참고.
+
+노드를 뺄 때는 대칭적인 DROP 계열 명령을 쓴다. FE(Follower/Observer)는 즉시 제거되지만, BE/CN은 그 위 태블릿이 다른 노드로 먼저 옮겨져야 해서 시간이 걸린다 — `DROP` 대신 `DECOMMISSION`으로 리밸런싱을 먼저 끝내는 게 안전하다.
+
+```sql
+ALTER SYSTEM DROP OBSERVER "fe-obs1-0.fe-obs1-hl.starrocks.svc.cluster.local:9010";
+ALTER SYSTEM DROP FOLLOWER "<host>:9010";
+
+-- BE/CN은 즉시 DROP하면 그 위 데이터가 든 태블릿이 바로 유실될 위험이 있다.
+-- DECOMMISSION은 태블릿을 다른 노드로 옮긴 뒤 스스로 빠진다 (완료까지 SHOW BACKENDS로 진행 확인).
+ALTER SYSTEM DECOMMISSION BACKEND "sn-be1-0.sn-be1-hl.starrocks-sn.svc.cluster.local:9050";
+```
+
+## 재시작
+
+k8s Deployment로 떠있으므로 재시작은 롤아웃 재시작으로 한다 (StarRocks 자체엔 별도 재시작 명령이 없다).
+
+```bash
+# FE/BE/CN 각각 (동시에 여러 개를 재시작하면 안 됨 — 특히 FE는 리더가 재선출되는 동안 메타데이터 쓰기가 잠깐 멎는다)
+kubectl -n starrocks rollout restart deployment fe
+kubectl -n starrocks rollout status deployment/fe --timeout=180s
+
+kubectl -n starrocks rollout restart deployment cn
+kubectl -n starrocks-sn rollout restart deployment sn-be1
+```
+FE가 여러 대(Follower/Observer 포함)면 한 번에 하나씩만 재시작하고 `SHOW FRONTENDS\G`로 Alive를 확인한 뒤 다음으로 넘어간다 — 리더가 포함된 경우 재시작 중 잠깐 새 리더를 선출하므로, 남은 Follower 수가 과반(BDBJE 쿼럼)을 유지하는지 미리 확인해야 한다.
+
+## 흔한 장애 체크리스트
+
+- **`SHOW FRONTENDS`에서 특정 FE의 Alive가 `false`**: 해당 파드 로그(`kubectl -n starrocks logs <fe pod>`)에서 BDBJE 관련 에러부터 확인. `fe.conf`의 `aws_s3_endpoint`(RGW 주소)가 실제로 풀리는 도메인인지도 확인 — DNS 문제로 기동에 실패하는 경우가 있다.
+- **`STREAM LOAD`가 타임아웃/실패**: FE의 8030 HTTP 포트로 보낸 요청이 실제 담당 BE/CN으로 리다이렉트되는데, 그 BE/CN이 죽어있으면 실패한다 — `SHOW BACKENDS\G`/`SHOW COMPUTE NODES\G`로 대상 노드가 Alive인지 먼저 확인.
+- **첫 테이블 생성이 오래 걸리다 실패**: cloud-native(shared_data) 모드는 콜드 스타트 시 첫 태블릿 생성이 60~300초 걸릴 수 있다 — `tablet_create_timeout_second` 기본값(10초)이 너무 짧아서 실패했다면 `fe.conf`에서 늘렸는지 확인.
+- **쿼리가 느린데 이유를 모르겠음**: `EXPLAIN <쿼리>`로 실행 계획을 먼저 본다. cloud-native 테이블은 `datacache.enable` 여부에 따라 첫 조회와 캐시 히트 후 성능 차이가 크다 — [concepts/starrocks.md](../concepts/starrocks.md) 참고.
