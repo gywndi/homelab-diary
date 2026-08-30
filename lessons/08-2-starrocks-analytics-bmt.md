@@ -6,8 +6,8 @@
 
 | 측정 방법 | 결과 |
 |---|---|
-| CRUD 단발 측정 | 쓰기는 로컬이, 조회/UPDATE/DELETE는 RGW가 우세 |
-| 대용량(GB) + 순수 쓰기(STREAM LOAD) | 로컬이 15% 빠름 |
+| CRUD 단발 측정 | 쓰기는 로컬이, 조회/UPDATE는 RGW가 우세(DELETE는 오차 범위) |
+| 대용량(GB) + 순수 쓰기(STREAM LOAD) | 로컬이 **1.6배** 빠름 |
 | 소규모 조회, 200회 직렬 반복 | RGW가 13% 빠름(워밍업 배제한 정상 상태) |
 | 소규모 조회, 20커넥션 동시(FE가 CN1과 같은 6코어 노드) | **로컬이 2.25배 빠름** |
 | 소규모 조회, 20커넥션 동시(FE를 가장 여유 있는 12코어 노드로 이동) | RGW가 140.1 → **224.7 QPS로 60%+ 개선** |
@@ -18,17 +18,21 @@
 
 ## CRUD / 대용량 로드 / STREAM LOAD
 
+2026-08-30 Ceph를 Rook(k8s)에서 cephadm(베어메탈)으로 재구축한 뒤 재측정한 결과다(아래 CRUD/STREAM LOAD 두 표). MPP(3-way JOIN) 표는 이번에 다시 측정하지 않은 이전(Rook 시절) 수치로 남겨뒀다 — 참고용으로만 볼 것.
+
 Primary Key 테이블(30만 행)에 INSERT/SELECT(point)/SELECT(집계)/UPDATE(upsert)/DELETE 시퀀스를 돌렸다.
 
 | CRUD 작업 | shared-nothing | shared-data(RGW) | 우세 |
 |---|---|---|---|
-| INSERT (30만 행) | 644.5ms | 700.7ms | SN 8% |
-| SELECT (point) | 16.5ms | 7.5ms | SD 2배 |
-| SELECT (집계) | 42.5ms | 25.2ms | SD 68% |
-| UPDATE (upsert 3만 행) | 203.4ms | 120.8ms | SD 68% |
-| DELETE (3만 행) | 209.9ms | 146.6ms | SD 43% |
+| INSERT (30만 행) | 634.1ms | 722.9ms | SN 12% |
+| SELECT (point) | 8.1ms | 4.7ms | SD 42% |
+| SELECT (집계) | 20.0ms | 12.0ms | SD 40% |
+| UPDATE (upsert 3만 행) | 210.3ms | 144.8ms | SD 31% |
+| DELETE (3만 행) | 211.2ms | 220.6ms | SN 4%(오차 범위) |
 
-`fact(1000만 행)` + `customer(10만)` + `product(1만)` 스타 스키마로 3-way JOIN도 비교했다.
+단발 측정이라 절대값은 이전 라운드와도 꽤 다르다(예: shared-nothing point SELECT가 16.5ms→8.1ms) — 인프라가 바뀌어서라기보다 그때그때의 캐시/스케줄링 상태 영향이 크다는 뜻이다. **방향(쓰기는 로컬 우세, 조회/갱신은 RGW 우세)은 일관되게 유지된다.**
+
+`fact(1000만 행)` + `customer(10만)` + `product(1만)` 스타 스키마로 3-way JOIN도 비교했다(Rook 시절 측정, 재검증 안 함).
 
 | 테스트 | shared-nothing | shared-data(RGW) | 우세 |
 |---|---|---|---|
@@ -39,10 +43,10 @@ Primary Key 테이블(30만 행)에 INSERT/SELECT(point)/SELECT(집계)/UPDATE(u
 
 | 방식 | LoadTimeMs |
 |---|---|
-| shared-nothing(2-replica) | 46,377ms |
-| shared-data(RGW size=2) | 54,443ms |
+| shared-nothing | 51,571ms |
+| shared-data(RGW) | 83,511ms |
 
-**로컬이 15% 빠르다.** 순수 쓰기 경로에서는 shared-nothing이 우위였다.
+**로컬이 1.6배 빠르다.** 순수 쓰기 경로는 여전히 shared-nothing이 우위지만, 격차는 이전(1.17배)보다 커졌다. 처음 이 배율이 3.1배까지 벌어져서 재조사했더니, RGW 데이터 풀의 복제본 수(size)가 의도한 2가 아니라 cephadm 기본값인 3으로 조용히 되돌아가 있었다 — [`07-1-ceph-storage.md`의 관련 알려진 이슈](07-1-ceph-storage.md#rgw-데이터-풀의-size2-결정이-재구축-과정에서-조용히-사라져-있었다) 참고. size를 2로 되돌린 뒤 재측정한 게 위 값이다. 남은 격차(1.17배 → 1.6배)는 RGW 데이터 풀의 PG(Placement Group)가 여전히 1개뿐이라 병렬 분산이 안 되는 것과, shared-nothing 자체의 런마다 편차(같은 조건에서 34.9초~51.6초까지 관측됨)가 섞여 있어서 정확한 원인 분리는 안 됐다 — 필요하면 PG 수를 늘려 추가 검증할 것.
 
 ## 워밍업 영향: 직렬 반복 vs 동시 부하
 
