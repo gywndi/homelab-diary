@@ -5,7 +5,7 @@
 # MetalLB로 VIP를 받고 양쪽 노드에 파드가 하나씩 뜨도록 패치한다.
 #
 # 사용법: ./03-install-ingress-nginx.sh <VIP>
-#   예: ./03-install-ingress-nginx.sh 10.5.5.2
+#   예: ./03-install-ingress-nginx.sh 10.5.5.50
 
 set -euo pipefail
 

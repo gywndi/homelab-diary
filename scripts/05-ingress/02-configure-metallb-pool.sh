@@ -2,7 +2,7 @@
 # MetalLB에 VIP로 쓸 IP 대역을 등록 (IPAddressPool + L2Advertisement)
 #
 # 사용법: ./02-configure-metallb-pool.sh <VIP>
-#   예: ./02-configure-metallb-pool.sh 10.5.5.2
+#   예: ./02-configure-metallb-pool.sh 10.5.5.50
 
 set -euo pipefail
 
