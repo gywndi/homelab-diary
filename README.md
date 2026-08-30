@@ -1,8 +1,8 @@
 # Homelab Diary
 
-우분투 서버 두 대(chan08, chan09)에 Kubernetes 클러스터, MySQL active/standby 이중화, KVM 가상화 기반까지 구성한 프로비저닝 스크립트와 구성 문서 모음.
+우분투 서버(chan08, chan09, llm001)에 Kubernetes 클러스터, Ceph 스토리지, MySQL, StarRocks, KVM 가상화 기반까지 구성한 프로비저닝 스크립트와 구성 문서 모음.
 
-대상 서버: chan08(10.5.5.8) · chan09(10.5.5.9) · OS: Ubuntu 24.04 LTS
+대상 서버: chan08(10.5.5.8) · chan09(10.5.5.9) · llm001(10.5.5.10, GPU) · OS: Ubuntu 24.04 LTS
 
 ## 구성 요소 (Stage 1)
 
@@ -33,5 +33,12 @@
 9. 내부 도메인 DNS (CoreDNS)
    - LAN·k8s 파드 양쪽에서 `k8s.home`/`ceph.home` 같은 이름으로 서비스 VIP 접속
    - 문서 [바로가기](lessons/09-internal-dns.md)
+
+## 운영 명령 모음
+
+구축 절차가 아니라 평소 운영 중 상태 확인·트러블슈팅용 명령을 모아둔 문서.
+
+- [k8s 운영](lessons/ops-k8s.md) · [Ceph 운영](lessons/ops-ceph.md) · [StarRocks 운영](lessons/08-4-starrocks-ops.md) · [Ingress 운영](lessons/05-2-ingress-ops.md)
+- [리눅스 기본 상식](lessons/ops-linux-basics.md) — 위 운영 문서들에 나오는 명령을 이해하기 위한 systemd/UFW/디스크/LVM/SSH 등 공통 기초
 
 `lessons/`에 목적, 스크립트별 실행 명령, 설계 결정, 알려진 이슈가 정리되어 있다. `scripts/`에는 실행 스크립트 파일만 있다. `concepts/`에는 [Kubernetes 개념 정리](concepts/kubernetes.md), [Ceph 개념 정리](concepts/ceph.md), [StarRocks 개념 정리](concepts/starrocks.md)처럼 배경 개념 설명을 모아둔다.
