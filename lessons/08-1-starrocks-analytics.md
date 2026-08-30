@@ -91,6 +91,10 @@ ALTER SYSTEM ADD COMPUTE NODE "cn-0.cn-hl.starrocks.svc.cluster.local:9050";
 - 설명: 3노드(chan08/chan09/llm001)에 각각 BE를 배포하고 등록한다. `SHOW BACKENDS`로 BackendId가 전부 Alive인지 확인한다. `SHOW CREATE TABLE`에 `storage_volume`이 없고 `"replicated_storage"="true"`만 있으면 성공이다 — cloud-native와 구분되는 표시다. 데이터 로드 후 노드의 로컬 `data/` 디렉토리에 실제로 바이트가 쌓이는지 `du -sh`로 직접 확인해야 한다.
 - 스크립트: [`10-deploy-sn-be.sh`](../scripts/08-starrocks/10-deploy-sn-be.sh) (노드별 반복, `<노드> <접미사>`)
 
+### FE Observer 추가
+- 설명: shared-data(`starrocks`) 클러스터에 FE Observer를 추가한다. Observer는 메타데이터를 읽기 전용으로 복제만 받고 BDBJE 쿼럼 투표엔 참여하지 않는다 — 쓰기 지연에 영향 없이 쿼리 코디네이션 용량을 늘리는 레버다. 개념 설명은 [concepts/starrocks.md](../concepts/starrocks.md#fe-확장-follower-vs-observer) 참고.
+- 스크립트: [`17-add-fe-observer.sh`](../scripts/08-starrocks/17-add-fe-observer.sh) (`<이름> <배치할 노드>`, 예: `fe-obs1 chan09`)
+
 ### 애플리케이션에서 접속하기(pymysql)
 - 설명: StarRocks는 MySQL 프로토콜(9030 포트)을 그대로 쓴다. 기존 MySQL 클라이언트 라이브러리를 그대로 쓸 수 있다.
 - 스크립트: [`app-sample.py`](../scripts/08-starrocks/app-sample.py)

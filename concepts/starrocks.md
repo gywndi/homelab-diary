@@ -53,6 +53,39 @@ ReplayedJournalId: 2734
 ```
 `Role: LEADER`가 지금 메타데이터 쓰기 권한을 가진 FE다. `ReplayedJournalId`는 이 FE가 지금까지 반영한 메타데이터 변경 로그 번호 — 팔로워 여러 개를 비교하면 복제 지연 여부를 알 수 있다.
 
+## FE 확장: Follower vs Observer
+
+FE를 늘리는 목적은 둘 중 하나다. ① 리더 장애 시 자동 승격(HA), ② 쿼리 코디네이션(Parser/Analyzer/CBO/Coordinator) 처리량 확대. 이 둘을 같은 방법으로 풀면 안 된다 — FE 역할이 두 가지다.
+
+- **Follower**: BDBJE Paxos 쿼럼에 투표권을 가진 멤버. 메타데이터 쓰기(DDL 등)마다 과반수 확인이 필요해서, Follower를 늘릴수록 그 확인에 걸리는 지연이 늘어난다. 그래서 보통 3(또는 5)개로 작게 유지한다 — k8s의 etcd, Ceph의 mon과 같은 제약이다.
+- **Observer**: 메타데이터를 읽기 전용으로 복제만 받고 쿼럼 투표엔 참여하지 않는다. 투표 지연에 영향을 안 주므로, 쓰기 성능 걱정 없이 원하는 만큼 늘릴 수 있다. 쿼리 코디네이션 용량만 늘리고 싶을 때(리더 승격 후보는 필요 없을 때) 쓰는 게 Observer다.
+
+```sql
+-- Follower(투표 멤버) 추가 — 신중하게, 적은 개수만
+ALTER SYSTEM ADD FOLLOWER "<host>:<edit_log_port>";
+
+-- Observer(읽기 전용, 쿼럼 미참여) 추가 — 필요한 만큼 자유롭게
+ALTER SYSTEM ADD OBSERVER "<host>:<edit_log_port>";
+```
+
+우리 클러스터에 Observer 하나를 실제로 추가해봤다(`scripts/08-starrocks/17-add-fe-observer.sh`):
+```bash
+mysql -h fe.starrocks.svc.cluster.local -P 9030 -u root -e "SHOW FRONTENDS\G"
+```
+```
+*************************** 2. row ***************************
+             Name: fe-obs1-0.fe-obs1-hl.starrocks.svc.cluster.local_9010_...
+             Role: OBSERVER
+             Join: true
+            Alive: true
+ReplayedJournalId: 3544        -- 리더(3546)와 거의 일치, 복제 지연 거의 없음
+         IsHelper: false       -- 다른 FE가 join할 때 이 노드를 helper로 못 씀(관례상 Follower만 helper 역할)
+```
+
+클라이언트는 리더/팔로워/옵저버 아무 FE에나 붙어서 읽기 쿼리를 넣을 수 있다(쓰기만 리더로 전달됨). 그래서 실무에서는 여러 FE 앞에 로드밸런서(HAProxy/ProxySQL 등)를 두고 커넥션을 분산시킨다.
+
+다만 우리 자체 벤치마크([08-2](../lessons/08-2-starrocks-analytics-bmt.md))에서는 FE를 늘려도 동시성이 개선되지 않았다 — 그 워크로드의 진짜 병목이 FE 코디네이션이 아니라 CN이 매 쿼리마다 오브젝트 스토리지(RGW)로 왕복하는 네트워크 비용이었기 때문이다. FE 확장(Follower든 Observer든)은 "동시 커넥션/쿼리 계획 수립 자체가 병목일 때"만 효과가 있는 레버라는 뜻 — 병목이 어디인지 먼저 확인하지 않고 FE부터 늘리면 헛수고가 될 수 있다.
+
 ## shared-nothing vs shared-data — 데이터를 어디에 저장하는가
 
 같은 클러스터가 두 모드 중 하나로만 동작한다(섞어서 못 씀, `run_mode`로 FE를 처음 띄울 때 정해지고 이후 변경 불가).
