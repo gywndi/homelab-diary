@@ -1,5 +1,7 @@
 # Ingress + 인증서 자동화 (MetalLB + ingress-nginx + cert-manager)
 
+[← 이전: MySQL → Ceph RBD](03-2-mysql-ceph-migration.md) · [다음: Ingress 운영 →](04-2-ingress-ops.md)
+
 2노드 클러스터에 외부 도메인을 라우팅하는 Ingress 계층을 올리고, Let's Encrypt 인증서 발급/갱신을 자동화한다. 기존에 별도 서버에서 nginx로 처리하던 도메인 라우팅과 인증서 발급 기능을 이 클러스터로 이전했다.
 
 ## 목적

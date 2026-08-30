@@ -1,5 +1,7 @@
 # StarRocks 분석 엔진 (FE/CN, shared-data 기반)
 
+[← 이전: Ceph 벤치마크](07-2-ceph-storage-bmt.md) · [다음: StarRocks 벤치마크 →](08-2-starrocks-analytics-bmt.md)
+
 MPP(대규모 병렬 처리) 방식의 컬럼형 OLAP(Online Analytical Processing, 집계·분석 쿼리에 최적화된 처리 방식) 데이터베이스다. `starrocks` 네임스페이스에 FE(제어 평면) + CN(데이터 평면) 클러스터를 올렸다. 데이터는 로컬 디스크가 아니라 [Ceph RGW](07-1-ceph-storage.md)(오브젝트 스토리지)에 저장한다. 이 방식을 shared-data라 부른다.
 
 ## 목적

@@ -1,5 +1,7 @@
 # StarRocks 운영 명령 모음
 
+[← 이전: StarRocks 아카이브 적합성](08-3-starrocks-archive-fitness.md) · [다음: 내부 도메인 DNS →](09-internal-dns.md)
+
 [`08-1-starrocks-analytics.md`](08-1-starrocks-analytics.md)로 구축한 뒤 실제 쓰면서 반복적으로 쓰는 SQL/명령들. 구축 절차가 아니라 "테이블 만들 때, 데이터 넣을 때, 상태 확인할 때" 참고하는 용도. 전부 `mysql -h fe.starrocks.svc.cluster.local -P 9030 -u root` 클라이언트로 실행한다(비밀번호 없음, 기본 상태).
 
 ## 테이블 생성

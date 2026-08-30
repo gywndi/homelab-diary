@@ -1,5 +1,7 @@
 # Kubernetes 클러스터 구축 (Stage 1, 2노드)
 
+[← 이전: 서버 초기 프로비저닝](01-provision.md) · [다음: MySQL active/standby →](03-1-mysql-ha.md)
+
 chan08(컨트롤플레인) + chan09(워커), CNI는 Flannel. Kubernetes v1.36.4 (dl.k8s.io stable 채널 기준 자동 선택).
 
 ## 목적

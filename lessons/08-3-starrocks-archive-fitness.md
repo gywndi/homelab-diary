@@ -1,5 +1,7 @@
 # StarRocks를 MySQL 콜드 데이터 장기보관처로 쓸 수 있는가
 
+[← 이전: StarRocks 벤치마크](08-2-starrocks-analytics-bmt.md) · [다음: StarRocks 운영 →](08-4-starrocks-ops.md)
+
 배경은 [StarRocks 분석 엔진](08-1-starrocks-analytics.md), 클러스터 성능 확장 검증은 [BMT](08-2-starrocks-analytics-bmt.md) 참고.
 
 ## 배경

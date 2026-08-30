@@ -1,5 +1,7 @@
 # StarRocks 개념 정리
 
+[← 이전: Ceph 개념](02-ceph.md)
+
 StarRocks를 처음부터 배우면서 [분석 엔진](../lessons/08-1-starrocks-analytics.md)을 만들었다. 새 개념이 필요해질 때마다 여기 추가한다 — 교과서적 정의보다 "우리 클러스터에서 실제로 이게 왜 필요했는지"를 우선한다. 배포 절차 자체는 [StarRocks 분석 엔진](../lessons/08-1-starrocks-analytics.md) 참고.
 
 ## 전체 구조

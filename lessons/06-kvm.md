@@ -1,5 +1,7 @@
 # KVM 하이퍼바이저 인프라 (Stage 1)
 
+[← 이전: LLM GPU 노드](05-llm-gpu-node.md) · [다음: Ceph 스토리지 →](07-1-ceph-storage.md)
+
 Kubernetes로 옮기기 어려운 워크로드를 위한 대안. 실제 VM은 만들지 않고, libvirt와 스토리지 풀만 준비해둔 상태.
 
 ## 목적

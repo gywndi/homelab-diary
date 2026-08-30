@@ -1,5 +1,7 @@
 # MySQL을 Ceph RBD로 재배포
 
+[← 이전: MySQL active/standby](03-1-mysql-ha.md) · [다음: Ingress + 인증서 →](04-1-ingress.md)
+
 [Stage 1(chan08/chan09 keepalived 페일오버)](03-1-mysql-ha.md)을 대체했다. 이제 단일 mysqld가 k8s Deployment + Ceph RBD PVC 위에서 돈다. 스토리지 배경은 [Ceph 스토리지](07-1-ceph-storage.md) 참고.
 
 > VIP는 이 문서에 적힌 `10.5.5.4`에서 2026-08-29에 옮겨졌다(애플리케이션 VIP 대역 정책 적용). 지금은 IP를 직접 쓰지 않고 **`mysql.k8s.home`** 도메인으로 접속한다 — [내부 DNS](09-internal-dns.md) 참고. VIP가 다시 바뀌어도 이 도메인만 갱신하면 된다.

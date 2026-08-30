@@ -1,5 +1,7 @@
 # Ceph 스토리지 벤치마크
 
+[← 이전: Ceph 스토리지](07-1-ceph-storage.md) · [다음: StarRocks 분석 엔진 →](08-1-starrocks-analytics.md)
+
 설계는 [Ceph 스토리지](07-1-ceph-storage.md) 참고. RBD 자체가 실사용 가능한 성능인지 측정했다.
 
 ## 핵심 결론
