@@ -48,7 +48,7 @@ sudo journalctl -k | grep 'UFW BLOCK'
 
 ## UFW — 방화벽
 
-Ubuntu의 iptables(리눅스 커널 방화벽)를 다루기 쉽게 감싼 도구. 이 저장소의 모든 노드가 "기본은 인바운드 전체 차단, 필요한 포트만 내부망(`10.5.5.0/24`)에 허용"하는 정책을 쓴다([`01-provision.md`](01-provision.md#방화벽-정책) 참고).
+Ubuntu의 iptables(리눅스 커널 방화벽)를 다루기 쉽게 감싼 도구. 이 저장소의 모든 노드가 "기본은 인바운드 전체 차단, 필요한 포트만 내부망(`10.5.5.0/24`)에 허용"하는 정책을 쓴다([`01-provision.md`](01-provision.md#방화벽-정책-04-firewallsh) 참고).
 
 ```bash
 # 현재 규칙 전체 (번호 포함 — delete 할 때 번호로 지정 가능)

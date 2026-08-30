@@ -41,7 +41,7 @@ flowchart TB
 
 ```mermaid
 flowchart TB
-    WEB["인터넷 (80/443)"] --> INGVIP["Ingress VIP 10.5.5.2<br/>(MetalLB)"]
+    WEB["인터넷 (80/443)"] --> INGVIP["Ingress VIP 10.5.5.50<br/>(MetalLB)"]
     INGVIP -. "리더 노드가 ARP 응답" .-> SPEAKER["speaker"]
     SPEAKER --> PROXY["kube-proxy<br/>(어느 노드의 nginx로 보낼지 분산)"]
     PROXY --> NGINX1["ingress-nginx (chan08)"]
