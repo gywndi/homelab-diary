@@ -19,8 +19,14 @@ Stage 1은 MySQL 자체 복제(semi-sync)로 데이터를 이중화했다. 이�
 
 ## 스크립트 목록 (이름 순)
 
-### MySQL k8s 리소스(네임스페이스/설정/PVC) 생성
-- 설명: RBD PVC(30Gi, `ceph-csi-rbd`) 기반으로 MySQL을 재배포하기 위한 네임스페이스/ConfigMap/PVC를 만든다.
+### 네임스페이스 생성
+- 설명: MySQL 전용 네임스페이스를 만든다(모든 하위 리소스가 이 안에 들어간다).
+```bash
+kubectl create namespace mysql
+```
+
+### MySQL k8s 리소스(설정/PVC) 생성
+- 설명: RBD PVC(30Gi, `ceph-csi-rbd`) 기반으로 MySQL을 재배포하기 위한 ConfigMap/PVC를 만든다.
 - 스크립트: [`08-mysql-configmap-pvc.yaml`](../scripts/07-ceph-storage/08-mysql-configmap-pvc.yaml)
 ```yaml
 apiVersion: v1
@@ -43,9 +49,12 @@ spec:
   storageClassName: ceph-csi-rbd
   resources: {requests: {storage: 30Gi}}
 ```
+```bash
+kubectl apply -f 08-mysql-configmap-pvc.yaml
+```
 
 ### MySQL Deployment 배포
-- 설명: Deployment(replicas=1) + Recreate 전략 + 명시적 PVC로 구성한다.
+- 설명: Deployment(replicas=1) + Recreate 전략 + 명시적 PVC로 구성한다. 최초 배포 시에는 PVC가 비어있는 상태로 뜨므로, 실제 데이터는 아래 "최초 마이그레이션 기록"의 절차로 채운다 — 이 파드가 처음부터 빈 데이터로 기동해도 정상이다.
 - 스크립트: [`10-mysql-deploy.yaml`](../scripts/07-ceph-storage/10-mysql-deploy.yaml)
 ```yaml
 apiVersion: apps/v1
@@ -68,6 +77,40 @@ spec:
         - {name: data, persistentVolumeClaim: {claimName: mysql-data}}
         - {name: config, configMap: {name: mysql-config}}
 ```
+```bash
+kubectl apply -f 10-mysql-deploy.yaml
+kubectl -n mysql rollout status deployment/mysql --timeout=180s
+```
+
+### Service(MetalLB VIP) 노출
+- 설명: 기존 VIP를 MetalLB LoadBalancer Service로 재현한다. 전용 IPAddressPool(`mysql-pool`, 주소 1개짜리)을 따로 둬서 이 Service만 그 IP를 배타적으로 받게 했다 — [ingress](05-1-ingress.md#vip-대역-등록)처럼 공유 풀에 `loadBalancerIPs` annotation으로 못 박는 대신, "이 풀엔 이 IP 하나뿐"이라는 방식으로 같은 효과를 냈다. `externalTrafficPolicy: Local`이 필수인 이유는 아래 "알려진 이슈" 참고. 별도 스크립트 파일 없이 인터랙티브로 적용했다 — 재현 시 아래 매니페스트 그대로 사용.
+```yaml
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata: {name: mysql-pool, namespace: metallb-system}
+spec:
+  addresses: ["10.5.5.51/32"]
+---
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata: {name: mysql-l2, namespace: metallb-system}
+spec:
+  ipAddressPools: [mysql-pool]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: mysql, namespace: mysql}
+spec:
+  type: LoadBalancer
+  externalTrafficPolicy: Local
+  selector: {app: mysql}
+  ports:
+    - {port: 3306, targetPort: 3306}
+```
+```bash
+kubectl apply -f mysql-svc.yaml
+kubectl -n mysql get svc mysql   # EXTERNAL-IP가 10.5.5.51(mysql.k8s.home)로 뜨는지 확인
+```
 
 ## 최초 마이그레이션 기록 (2026-08-27, 스크립트는 삭제됨)
 
@@ -89,6 +132,26 @@ spec:
 
 ### externalTrafficPolicy 기본값 때문에 호스트 기반 인증이 깨졌다(가장 심각했던 문제)
 `Cluster`(기본값) 정책에서는 트래픽을 받은 노드와 파드가 있는 노드가 다르면 kube-proxy가 SNAT(요청의 출발지 IP를 바꿔치기하는 것)을 한다. 그러면 MySQL이 보는 클라이언트 IP가 호스트 기반 grant(`user@'10.5.5.%'`)와 안 맞는 pod-CIDR 주소로 바뀐다. 실서비스 DB 라우트가 전부 500 에러를 냈다. `externalTrafficPolicy: Local`로 바꿔서 해결했다(단일 replica라 가용성 영향 없음). **호스트 기반 MySQL 인증 + MetalLB LoadBalancer 조합에서는 `Local`이 필수다.**
+
+## 검증 명령
+
+```bash
+# 파드/PVC/Service가 전부 정상인지 한눈에
+kubectl -n mysql get pods,pvc,svc -o wide
+
+# 파드 안에서 직접 접속 (root는 auth_socket 인증이라 로컬에서만 됨 — 네트워크 접속엔 못 씀)
+kubectl -n mysql exec deploy/mysql -- mysql -e "SELECT 1;"
+
+# VIP/도메인까지 실제로 도달하는지 (실제 계정 없이도 네트워크+서버 응답을 확인하는 방법 —
+# "Access denied"가 나오면 인증만 실패한 것이고, DNS 해석부터 externalTrafficPolicy: Local
+# 라우팅까지는 전부 정상이라는 뜻이다. "connect ... failed"/타임아웃이면 그 앞단이 문제)
+kubectl run mysql-connect-test --rm -i --restart=Never --image=mysql:8.0.46 -- \
+  mysqladmin ping -h mysql.k8s.home -u probe
+
+# 실제 애플리케이션 계정으로 접속 확인 (호스트 기반 grant라 10.5.5.0/24 대역의 실제 호스트에서 실행해야 함 —
+# k8s 파드 안에서 실행하면 출발지 IP가 파드 서브넷(10.244.0.0/16)이라 grant와 안 맞아 무조건 거부된다)
+mysql -h mysql.k8s.home -u <애플리케이션 계정> -p -e "SELECT 1;"
+```
 
 ## 성능
 
