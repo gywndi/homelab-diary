@@ -161,7 +161,7 @@ kubectl get nodes -o json | jq '.items[] | {name:.metadata.name, gpu:.status.all
 kubectl -n kube-system get pods -l name=nvidia-device-plugin-ds -o wide
 
 # 노드 자체에서 드라이버가 살아있는지
-ssh 10.5.5.10 nvidia-smi
+ssh llm001.home nvidia-smi
 ```
 
 ## 방화벽(UFW)이 원인일 때

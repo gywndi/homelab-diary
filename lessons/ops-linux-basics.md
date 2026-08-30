@@ -166,13 +166,13 @@ sudo apt-get autoremove -y
 ssh-keygen -t ed25519
 
 # 공개키를 원격 서버의 authorized_keys에 등록 (비밀번호 인증이 아직 될 때 1회 실행)
-ssh-copy-id chan@10.5.5.8
+ssh-copy-id chan@chan08.home
 
 # 원격에서 명령 하나만 실행하고 바로 나오기 (스크립트에서 자주 씀)
-ssh 10.5.5.8 "sudo systemctl status keepalived"
+ssh chan08.home "sudo systemctl status keepalived"
 
 # 여러 줄 명령을 한 번에 보낼 때
-ssh 10.5.5.8 <<'EOF'
+ssh chan08.home <<'EOF'
 sudo mkdir -p /etc/homelab-secrets
 sudo chmod 700 /etc/homelab-secrets
 EOF
@@ -196,7 +196,7 @@ arp -a | grep 10.5.5.50
 
 # 포트가 응답하는지 (curl로 HTTP까지 확인하거나, nc로 TCP 연결만 확인)
 curl -sk --max-time 2 -o /dev/null -w '%{http_code}\n' https://127.0.0.1:6443/livez
-nc -zv 10.5.5.4 7480
+nc -zv ceph.home 7480
 
 # DNS 조회 (내부 도메인이 실제로 풀리는지)
 getent hosts ceph.home
@@ -221,7 +221,7 @@ du -sh /data/*
 
 ```bash
 # 로컬↔원격 파일 복사
-scp local-file.txt chan@10.5.5.8:/home/chan/
+scp local-file.txt chan@chan08.home:/home/chan/
 
 # 디렉터리 동기화 — 권한/소유자/타임스탬프까지 그대로 유지 (-a), 데이터 이전 시 표준
 sudo rsync -a /var/lib/mysql.bak/ /data/mysql/

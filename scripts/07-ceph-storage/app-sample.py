@@ -5,18 +5,17 @@
 사전 조건: pip install boto3
            전용 유저/키를 먼저 만들어둘 것 (radosgw-admin은 유저만 만들고 버킷 생성은
            S3 API로 해야 한다 — scripts/08-starrocks/00-create-rgw-user-and-bucket.sh 참고):
-             kubectl -n rook-ceph exec deploy/rook-ceph-tools -- \\
-               radosgw-admin user create --uid=<uid> --display-name="<name>" \\
-               --rgw-realm=starrocks-store
+             sudo cephadm shell -- radosgw-admin user create --uid=<uid> --display-name="<name>"
            출력의 keys[0].access_key / secret_key를 아래 자리에 채워 넣거나 환경변수로 분리할 것.
 
-RGW_ENDPOINT는 VIP(internal/ip-inventory.md 확인)로, 클러스터 안팎 어디서든 접근 가능하다
-(MetalLB LoadBalancer로 노출되어 있음 — k8s 내부 전용이 아님).
+RGW_ENDPOINT는 도메인(ceph.home)으로, 클러스터 안팎 어디서든 접근 가능하다
+(keepalived VIP로 노출되어 있음 — k8s 내부 전용이 아님. VIP 자체는
+internal/ip-inventory.md 확인).
 """
 import os
 import boto3
 
-RGW_ENDPOINT = "http://10.5.5.6:7480"
+RGW_ENDPOINT = "http://ceph.home:7480"
 ACCESS_KEY = os.environ.get("RGW_ACCESS_KEY", "<access_key>")
 SECRET_KEY = os.environ.get("RGW_SECRET_KEY", "<secret_key>")
 BUCKET = "demo-app-bucket"

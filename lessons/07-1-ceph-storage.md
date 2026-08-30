@@ -177,10 +177,14 @@ cephadm shell -- ceph osd pool application enable rbd-pool rbd
 ```
 
 ### RGW(오브젝트) 데몬 배치
-- 설명: RGW 데몬을 3노드 전부에 배치한다. RGW는 상태 없는(stateless) 데몬이라 더 넓게 분산할수록 유리하다.
+- 설명: RGW 데몬을 3노드 전부에 배치한다. RGW는 상태 없는(stateless) 데몬이라 더 넓게 분산할수록 유리하다. 데이터 풀은 `ceph orch apply rgw`가 클러스터 기본값(3노드라 size=3)으로 자동 생성하므로, 아래 "남아있는 리스크"에 적은 size=2 결정을 명시적으로 다시 적용해야 한다 — 안 하면 조용히 3-replica로 남는다.
 - 스크립트: [`18-cephadm-rgw.sh`](../scripts/07-ceph-storage/18-cephadm-rgw.sh)
 ```bash
 cephadm shell -- ceph orch apply rgw starrocks-store --placement="chan08,chan09,llm001" --port=7480
+
+# 데이터 풀이 생성될 때까지 대기 후, 복제본 수를 의도한 값으로 낮춤
+cephadm shell -- ceph osd pool set default.rgw.buckets.data size 2
+cephadm shell -- ceph osd pool set default.rgw.buckets.data min_size 1
 ```
 
 ### RGW VIP(keepalived)
@@ -269,7 +273,7 @@ sudo blkid -s UUID -o value /dev/sda2
 cephadm shell -- radosgw-admin user create --uid=demo-app --display-name="Demo App"
 ```
 ```python
-s3 = boto3.client("s3", endpoint_url="http://10.5.5.4:7480",
+s3 = boto3.client("s3", endpoint_url="http://ceph.home:7480",
                    aws_access_key_id=ACCESS_KEY, aws_secret_access_key=SECRET_KEY,
                    region_name="default")   # boto3가 SigV4에 region을 요구 — RGW는 안 봐도 빈 값은 안 됨
 
@@ -294,6 +298,9 @@ LVM 논리 볼륨으로 한 겹 감싼 뒤(`pvcreate`/`vgcreate`/`lvcreate`) 그
 
 ### 디스크를 재분할하면 그 위 hostPath 디렉터리도 같이 사라진다
 StarRocks shared-nothing BE가 쓰는 `/mnt/starrocks-be/sn-data`는 XFS 파티션 위 디렉터리라서, 파티션을 다시 나누면 같이 없어진다. BE를 다시 배포하기 전에 노드마다 새로 만들어야 한다.
+
+### RGW 데이터 풀의 size=2 결정이 재구축 과정에서 조용히 사라져 있었다
+Rook 시절엔 `default.rgw.buckets.data`를 의도적으로 size=2로 낮춰뒀는데(아래 "남아있는 리스크" 참고), cephadm으로 재구축하면서 이 설정을 다시 적용하는 걸 빠뜨렸다. `ceph orch apply rgw`가 데이터 풀을 처음 만들 때 클러스터 기본값(3노드 클러스터라 size=3)으로 만들기 때문에, 별도로 낮추지 않으면 조용히 3-replica로 굳어진다. 에러도, 경고도 없어서 [`08-2-starrocks-analytics-bmt.md`](08-2-starrocks-analytics-bmt.md) 재측정 중 STREAM LOAD 쓰기 성능이 예상 밖으로 나빠진 걸 보고 나서야 발견했다. `18-cephadm-rgw.sh`에 이제 이 단계를 포함시켰다 — RGW 배치를 새로 하거나 realm을 다시 만드는 등 데이터 풀이 재생성되는 상황에서는 이 값을 다시 확인할 것.
 
 ## 검증 명령
 
