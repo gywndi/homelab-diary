@@ -56,15 +56,21 @@ rgw.starrocks-store.llm001.hypomh  llm001  *:7480               running
 ## 기본 단위
 
 ### 클러스터 / 풀(Pool) / PG(Placement Group)
-클러스터는 mon+OSD 전체를 묶은 하나의 단위다. 그 안에 풀(Pool)이라는 논리적 구획을 여러 개 만들 수 있다 — 우리는 `rbd-pool`(MySQL/KVM용), `.rgw.root`/`default.rgw.*`(RGW 메타데이터·버킷 데이터용)를 쓴다.
+클러스터는 mon+OSD 전체를 묶은 하나의 단위다. 그 안에 풀(Pool)이라는 논리적 구획을 여러 개 만들 수 있다 — RBD는 `rbd-pool` 딱 하나면 되지만, RGW는 `ceph orch apply rgw` 한 번으로 역할이 다른 풀 7개(`.rgw.root`, `default.rgw.{log,control,meta,buckets.index,buckets.data,buckets.non-ec}`)가 한꺼번에 만들어진다.
 
 ```bash
 sudo cephadm shell -- ceph osd pool ls detail
 ```
 ```
 pool 2 'rbd-pool' replicated size 3 min_size 2 ... pg_num 32 pgp_num 32 ...
-pool 8 'default.rgw.buckets.data' replicated size 3 min_size 2 ... pg_num 1 ...
+pool 3 '.rgw.root' replicated size 3 min_size 2 ... pg_num 32 ...
+pool 6 'default.rgw.meta' replicated size 3 min_size 2 ... pg_num 32 ...
+pool 7 'default.rgw.buckets.index' replicated size 3 min_size 2 ... pg_num 32 ...
+pool 8 'default.rgw.buckets.data' replicated size 2 min_size 1 ... pg_num 1 ...
+pool 9 'default.rgw.buckets.non-ec' replicated size 3 min_size 2 ... pg_num 32 ...
 ```
+
+RGW 풀들 중 실제 오브젝트 바이트(파일 내용)를 담는 건 `buckets.data` 하나뿐이다. 나머지(`root`/`log`/`control`/`meta`/`buckets.index`)는 버킷·유저 메타데이터나 오브젝트 인덱스처럼 작은 키-값을 빠르게 랜덤으로 읽고 써야 하는 데이터라 replicated를 쓴다 — 아래 "erasure coding" 항목에서 다루는 EC는 이 중 `buckets.data`에만 해당하는 얘기다. `buckets.non-ec`은 EC를 안 쓰는 지금도 이미 만들어져 있는데, `buckets.data`가 EC로 바뀌었을 때 오브젝트가 너무 작아 EC 오버헤드가 손해인 경우 자동으로 여기(replicated)에 담기게 하려고 RGW가 미리 준비해두는 풀이다.
 
 풀 하나를 그대로 OSD에 매핑하지 않는다. 풀은 다시 PG(Placement Group, 데이터를 나눠 담는 논리적 단위) 여러 개로 쪼개지고, 그 PG 하나하나가 CRUSH 알고리즘으로 특정 OSD 조합에 배정된다. `pg_num`이 그 조각 개수다 — 너무 적으면 OSD 간 부하가 고르게 안 퍼지고, 너무 많으면 관리 오버헤드가 커진다. `autoscale_mode on`이면 Ceph가 클러스터 크기에 맞춰 알아서 조정해준다(우리는 다 켜뒀다).
 
@@ -73,7 +79,7 @@ pool 8 'default.rgw.buckets.data' replicated size 3 min_size 2 ... pg_num 1 ...
 
 ### erasure coding — replication보다 용량 효율적인 대안
 
-풀을 만들 때 `replicated` 대신 고를 수 있는 또 다른 방식이다. 데이터를 그대로 복제하는 대신, 조각으로 쪼개고 그 조각들로 "복구용 여분 조각(패리티)"을 계산해서 같이 저장한다 — RAID 5/6와 같은 원리다.
+풀을 만들 때 `replicated` 대신 고를 수 있는 또 다른 방식이다. RBD 전용이 아니다 — 오히려 반대로, RBD보다 RGW의 `buckets.data`(위 "클러스터 / 풀 / PG" 참고)에 훨씬 잘 맞는 방식이다. 데이터를 그대로 복제하는 대신, 조각으로 쪼개고 그 조각들로 "복구용 여분 조각(패리티)"을 계산해서 같이 저장한다 — RAID 5/6와 같은 원리다.
 
 **예: k=2(데이터 조각 2개), m=1(패리티 조각 1개)**
 1. 원본을 `A`, `B` 두 조각으로 쪼갠다.
