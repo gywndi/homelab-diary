@@ -123,14 +123,14 @@ curl --location-trusted -u root: \
 ### FE/CN/BE가 자기 자신을 클러스터 DNS로 못 찾는 이름으로 등록해버린다
 `--host_type FQDN`으로 기동해도, headless Service 없이 일반 Deployment로 띄우면 파드가 자기 identity를 무작위 호스트명(예: `fe-8648f9875-7wbh2`)으로 잡는다. 클러스터 DNS에 등록된 이름이 아니라서 서로 통신이 끊긴다(`Could not resolve host for client socket`). headless Service(`clusterIP: None`) + 고정 `hostname`/`subdomain`으로 안정적인 FQDN을 부여해서 해결했다.
 
-### 멈춘 것처럼 보였지만 사실 그냥 느렸다
-첫 테이블 생성 시도가 매번 타임아웃났다. CN 로그의 `task_count_in_queue`가 계속 늘어나기만 해서 "CN이 뭔가에 완전히 막혔다"고 오판했다. RGW 자체 로그를 열어보니 실제로는 S3 요청이 낮은 지연(1ms 미만)으로 계속 성공하고 있었다. 콜드 스타트 상태에서 첫 테이블 생성에 필요한 절대적인 단계 수가 많아 오래 걸렸을 뿐이었다. `tablet_create_timeout_second`를 300초로 임시로 늘려서 한 번 통과시키니, 이후 테이블 생성은 3초 내외로 정상화됐다(이후 60초로 축소).
+### 콜드 스타트 상태에서 첫 테이블 생성이 오래 걸려 타임아웃난다
+RGW 자체는 낮은 지연(1ms 미만)으로 정상 응답 중이어도, 콜드 스타트 상태에서 첫 테이블 생성에 필요한 단계 수가 많아 기본 타임아웃을 넘길 수 있다. `tablet_create_timeout_second`를 300초로 임시로 늘려 한 번 통과시키면, 이후 테이블 생성은 3초 내외로 정상화된다(이후 60초로 축소 가능).
 
-### 검색으로 찾은 fe.conf 키가 실제로는 존재하지 않았다
-`aws_s3_enable_path_style_access` 같은 키를 검색으로 찾아 넣었지만, StarRocks 소스(`Config.java`)를 직접 확인하니 이 키 자체가 없었다. 커스텀 엔드포인트를 지정하면 path-style이 자동 적용되는 것으로 보였다(RGW 로그로 실제 요청 형식을 확인).
+### `aws_s3_enable_path_style_access`는 존재하지 않는 fe.conf 키다
+StarRocks 소스(`Config.java`)에 없는 키다 — 커스텀 S3 엔드포인트를 지정하면 path-style이 자동 적용된다.
 
-### FE Follower 등록이 첫 시도에서 조용히 실패했다
-`ALTER SYSTEM ADD FOLLOWER` 실행 직후 바로 새 FE 파드를 띄우면 "current node is not added to the group. please add it first"를 반복하며 무한 재시도하는 경우가 있었다. 원인은 불명이다(타이밍 이슈로 추정). `SHOW PROC '/frontends'`로 실제 등록 여부를 확인하고, 안 됐으면 `ALTER SYSTEM ADD FOLLOWER`를 재실행하면 곧바로 성공했다.
+### FE Follower 등록이 첫 시도에서 조용히 실패할 수 있다
+`ALTER SYSTEM ADD FOLLOWER` 직후 바로 새 FE 파드를 띄우면 "current node is not added to the group. please add it first"를 반복하며 재시도할 수 있다(원인 불명, 타이밍 이슈로 추정). `SHOW PROC '/frontends'`로 등록 여부를 확인하고, 안 됐으면 `ALTER SYSTEM ADD FOLLOWER`를 재실행하면 된다.
 
 ### FE Follower conf에 RGW 자격증명을 빠뜨리면 쿼리 조정이 안 된다
 follower도 cloud-native 테이블 쿼리를 조정하려면 storage volume을 해석해야 한다. 리더와 동일한 `aws_s3_*` 설정이 필요하다.

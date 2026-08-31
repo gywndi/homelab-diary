@@ -110,14 +110,14 @@ SSH 키는 이 노드(호스트)의 `/home/chan/.ssh/authorized_keys`를 그대�
 
 ## 알려진 이슈
 
-### `/data/vms`가 어느샌가 사라져 있었다
-최초 설계 시점엔 전용 `/data` 파티션 아래 `data-pool`을 쓸 계획이었다. 이후 Ceph를 cephadm으로 재구축하면서 디스크 전체가 재분할돼 `/data`라는 마운트 자체가 없어졌다(`sda1`=Ceph OSD LVM, `sda2`=`/mnt/local-data`로 재편). VM을 실제로 만들려는 시점에야 이 사실을 발견했다 — 스토리지 풀 경로를 남은 XFS 파티션(`/mnt/local-data/vm-disks`)으로 다시 잡았다. 인프라 설계 문서에 "나중에 정한다"고 미뤄둔 값은, 정말 그 시점이 왔을 때 반드시 다시 확인해야 한다는 교훈.
+### 스토리지 풀 경로가 애초 계획과 달라짐
+전용 `/data` 파티션(`data-pool`)을 쓸 계획이었으나, Ceph를 cephadm으로 재구축하며 디스크가 재분할돼 `/data` 마운트 자체가 사라졌다(`sda1`=Ceph OSD LVM, `sda2`=`/mnt/local-data`). 남은 XFS 파티션(`/mnt/local-data/vm-disks`)으로 스토리지 풀 경로를 다시 잡았다.
 
 ### VM 재생성 시 known_hosts 충돌
-같은 이름으로 VM을 파괴 후 재생성하면 SSH 호스트 키가 바뀐다. 관리 머신의 `known_hosts`에 이전 키가 남아있으면 "REMOTE HOST IDENTIFICATION HAS CHANGED" 경고와 함께 접속이 거부된다 — `ssh-keygen -R <IP>`로 예전 항목을 지우고 재접속하면 된다. 새 VM이라 실제 보안 위협은 아니지만, 진짜 중간자 공격과 증상이 똑같아 보이므로 "내가 방금 이 VM을 재생성했다"는 맥락 없이 이 경고를 만나면 원인을 먼저 확인해야 한다.
+같은 이름으로 VM을 파괴 후 재생성하면 SSH 호스트 키가 바뀌어, 관리 머신 `known_hosts`에 남은 이전 키 때문에 "REMOTE HOST IDENTIFICATION HAS CHANGED" 경고와 함께 접속이 거부된다 — `ssh-keygen -R <IP>`로 예전 항목을 지우고 재접속하면 된다.
 
 ### cloud-init 자격증명 첫 줄만 넣으면 틀릴 수 있다
-`authorized_keys`에 키가 여러 개(예: 예전 노트북 키 + 현재 관리 머신 키) 있을 때 `head -1`로 첫 줄만 넣으면, 그게 지금 실제로 쓰는 키가 아닐 수 있다 — 실제로 이 문제로 한 VM만 접속이 안 됐다. 파일 안의 키를 전부 넣는 쪽이 안전하다(위 스크립트는 이렇게 수정됨).
+`authorized_keys`에 키가 여러 개 있을 때 `head -1`로 첫 줄만 넣으면 지금 실제로 쓰는 키가 아닐 수 있어 접속이 안 된다. 파일 안의 키를 전부 넣는 쪽이 안전하다(현재 스크립트는 이렇게 되어 있음).
 
 ## 검증 명령
 

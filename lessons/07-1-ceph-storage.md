@@ -299,8 +299,8 @@ LVM 논리 볼륨으로 한 겹 감싼 뒤(`pvcreate`/`vgcreate`/`lvcreate`) 그
 ### 디스크를 재분할하면 그 위 hostPath 디렉터리도 같이 사라진다
 StarRocks shared-nothing BE가 쓰는 `/mnt/local-data/sn-data`는 XFS 파티션 위 디렉터리라서, 파티션을 다시 나누면 같이 없어진다. BE를 다시 배포하기 전에 노드마다 새로 만들어야 한다.
 
-### RGW 데이터 풀의 size=2 결정이 재구축 과정에서 조용히 사라져 있었다
-Rook 시절엔 `default.rgw.buckets.data`를 의도적으로 size=2로 낮춰뒀는데(아래 "남아있는 리스크" 참고), cephadm으로 재구축하면서 이 설정을 다시 적용하는 걸 빠뜨렸다. `ceph orch apply rgw`가 데이터 풀을 처음 만들 때 클러스터 기본값(3노드 클러스터라 size=3)으로 만들기 때문에, 별도로 낮추지 않으면 조용히 3-replica로 굳어진다. 에러도, 경고도 없어서 [`08-3-starrocks-analytics-bmt.md`](08-3-starrocks-analytics-bmt.md) 재측정 중 STREAM LOAD 쓰기 성능이 예상 밖으로 나빠진 걸 보고 나서야 발견했다. `18-cephadm-rgw.sh`에 이제 이 단계를 포함시켰다 — RGW 배치를 새로 하거나 realm을 다시 만드는 등 데이터 풀이 재생성되는 상황에서는 이 값을 다시 확인할 것.
+### RGW 데이터 풀의 size=2 결정이 재구축 과정에서 누락되기 쉽다
+Rook 시절엔 `default.rgw.buckets.data`를 의도적으로 size=2로 낮춰뒀지만(아래 "남아있는 리스크" 참고), cephadm 재구축 시 이 설정을 놓치면 `ceph orch apply rgw`가 클러스터 기본값(3노드 기준 size=3)으로 풀을 만들어 에러/경고 없이 조용히 3-replica로 굳어진다. `18-cephadm-rgw.sh`에 이 단계를 포함시켜뒀다 — RGW를 새로 배치하거나 realm을 재생성할 때는 이 값을 다시 확인할 것.
 
 ## 검증 명령
 
