@@ -187,6 +187,35 @@ cephadm shell -- ceph osd pool set default.rgw.buckets.data size 2
 cephadm shell -- ceph osd pool set default.rgw.buckets.data min_size 1
 ```
 
+### erasure coding(EC) 풀 만들기 — 참고용, 지금은 안 씀
+- 설명: replicated 대신 EC로 풀을 만드는 방법. 개념은 [concepts/02-ceph.md](../concepts/02-ceph.md#erasure-coding--replication보다-용량-효율적인-대안), 실측은 [07-2-ceph-storage-bmt.md](07-2-ceph-storage-bmt.md#erasure-coding-vs-replication--실측-2026-08-31) 참고. 지금 운영 중인 `rbd-pool`/`default.rgw.buckets.data`는 둘 다 replicated 그대로다 — RBD(rbd-pool)는 실측상 EC가 전혀 안 맞고(랜덤 쓰기 18배 느림), RGW(buckets.data) 전환은 검토 중이라 아직 적용 안 했다.
+- 스크립트: [`21-cephadm-ec-pool-example.sh`](../scripts/07-ceph-storage/21-cephadm-ec-pool-example.sh)
+```bash
+sudo ./21-cephadm-ec-pool-example.sh test-ec-rbd 2 1
+```
+핵심 부분:
+```bash
+# EC 프로필 생성 (장애 도메인은 host — OSD 개수가 아니라 노드 개수가 k+m의 상한)
+cephadm shell -- ceph osd erasure-code-profile set test-ec-rbd-ec-profile k=2 m=1 crush-failure-domain=host
+
+# EC 풀 생성
+cephadm shell -- ceph osd pool create test-ec-rbd erasure test-ec-rbd-ec-profile
+cephadm shell -- ceph osd pool application enable test-ec-rbd rbd
+```
+RBD로 쓰려면 EC 풀만으로는 안 된다 — EC는 부분 덮어쓰기를 기본 지원하지 않아서, 이미지 헤더/스냅샷 등 랜덤 소규모 쓰기가 필요한 메타데이터는 별도 replicated 풀에 두고 EC 풀은 실제 데이터(`--data-pool`)로만 쓴다:
+```bash
+# 부분 덮어쓰기 허용 (BlueStore에서만 가능)
+cephadm shell -- ceph osd pool set test-ec-rbd allow_ec_overwrites true
+
+# 이미지 메타데이터용 소규모 replicated 풀
+cephadm shell -- ceph osd pool create test-ec-rbd-meta 1 1 replicated
+cephadm shell -- rbd pool init test-ec-rbd-meta
+
+# 실제 데이터는 EC 풀에, 이미지 자체(헤더)는 메타데이터 풀에
+cephadm shell -- rbd create --size 10G --data-pool test-ec-rbd test-ec-rbd-meta/bench
+```
+RGW(`buckets.data`)는 이 메타데이터 풀 단계가 필요 없다 — RGW 자체가 오브젝트를 통째로 쓰고 그대로 두는 방식이라 부분 덮어쓰기 지원이 애초에 필요 없기 때문이다.
+
 ### RGW VIP(keepalived)
 - 설명: RGW 앞단에 keepalived VIP(`10.5.5.4`, `ceph.home`)를 구성한다. 3노드 각각 실행한다 — 상태/우선순위만 다르게 준다.
 - 스크립트: [`19-cephadm-rgw-keepalived.sh`](../scripts/07-ceph-storage/19-cephadm-rgw-keepalived.sh)
