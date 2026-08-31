@@ -215,11 +215,11 @@ spec:
 기존 워커(chan09)와 신규 노드(llm001)를 컨트롤플레인으로 승격시키면 kubeadm이 자동으로 `node-role.kubernetes.io/control-plane:NoSchedule` taint를 붙인다. 클러스터 노드 3대 전부에 이 taint가 붙으면, 이 taint에 대한 toleration이 없는 일반 워크로드(cert-manager, metallb-controller 등 — 원래는 taint 없는 워커에 떠 있었음)가 스케줄될 곳이 완전히 사라져 `Pending`으로 멈춘다. 3대 전부의 컨트롤플레인 taint를 제거해서 해결했다 (위 설계 결정 참고).
 
 ### 컨트롤플레인 승격 시 붙는 exclude-from-external-load-balancers 라벨이 MetalLB VIP를 통째로 죽임
-kubeadm은 노드를 컨트롤플레인으로 승격시킬 때(`kubeadm init phase mark-control-plane`) taint 말고 라벨도 하나 더 붙인다 — `node.kubernetes.io/exclude-from-external-load-balancers`. "컨트롤플레인은 외부 로드밸런서 대상에서 빼라"는 표준 관례용 라벨인데, MetalLB가 이 라벨이 붙은 노드를 L2 공지(announce) 후보에서 아예 제외한다. chan09/llm001이 컨트롤플레인으로 승격되면서 이 라벨도 같이 따라붙었고, 물리 노드가 3대뿐이라 전부 컨트롤플레인인 이 클러스터에서는 **3대 전부가 후보에서 빠져버려 ingress VIP(10.5.5.2)를 아무도 공지하지 못하는 상태**가 됐다 — MetalLB 설정(IPAddressPool/L2Advertisement)도, 노드 상태(Ready)도, 방화벽도 전부 멀쩡한데 `kubectl -n metallb-system get servicel2status`에 아무 것도 안 뜨고 도메인 전체가 응답하지 않는 증상으로 나타났다. taint와 마찬가지로 3대 전부의 라벨을 제거해서 해결했다:
+kubeadm은 노드를 컨트롤플레인으로 승격시킬 때(`kubeadm init phase mark-control-plane`) taint 말고 라벨도 하나 더 붙인다 — `node.kubernetes.io/exclude-from-external-load-balancers`. "컨트롤플레인은 외부 로드밸런서 대상에서 빼라"는 표준 관례용 라벨인데, MetalLB가 이 라벨이 붙은 노드를 L2 공지(announce) 후보에서 아예 제외한다. chan09/llm001이 컨트롤플레인으로 승격되면서 이 라벨도 같이 따라붙었고, 물리 노드가 3대뿐이라 전부 컨트롤플레인인 이 클러스터에서는 **3대 전부가 후보에서 빠져버려 ingress VIP(10.5.5.2)를 아무도 공지하지 못하는 상태**가 됐다(`kubectl -n metallb-system get servicel2status`에 아무 것도 안 뜸). taint와 마찬가지로 3대 전부의 라벨을 제거해서 해결했다:
 ```bash
 kubectl label node chan08 chan09 llm001 node.kubernetes.io/exclude-from-external-load-balancers-
 ```
-컨트롤플레인 taint를 제거할 때 이 라벨은 별개라 같이 지워지지 않는다는 점이 함정이다 — 컨트롤플레인 승격 후 스케줄링(taint)만 확인하고 LoadBalancer 공지 대상(라벨)은 놓치기 쉽다.
+컨트롤플레인 taint를 제거해도 이 라벨은 별개라 같이 지워지지 않는다 — 컨트롤플레인 승격 후에는 taint(스케줄링)와 라벨(LoadBalancer 공지 대상) 둘 다 확인할 것.
 
 ### 컨트롤플레인을 고정 IP로 시작했다면 이 문서의 join 절차만으로는 부족함
 이 문서의 join 절차는 컨트롤플레인이 처음부터 VIP로 시작했다고 가정한다(현재 [`02-k8s-cluster.md`](02-k8s-cluster.md) 기준). 고정 IP로 초기화한 클러스터에 뒤늦게 VIP를 끼워 넣으려면 인증서 재발급 등 훨씬 번거로운 절차가 추가로 필요한데, 그 내용과 실제로 이 문제를 겪었던 이력은 [`02-k8s-cluster.md`의 "알려진 이슈: 고정 IP로 시작하면 나중에 힘들다"](02-k8s-cluster.md#알려진-이슈-고정-ip로-시작하면-나중에-힘들다)에 정리해뒀다.
