@@ -218,28 +218,45 @@ sudo mv /var/lib/etcd/etcd-backup-tmp.db /data/etcd-backup/etcd-snapshot-<타임
 
 내부적으로 하는 일(순서대로):
 ```bash
-# 1) kube-system의 kubeadm-config ConfigMap에 controlPlaneEndpoint/certSAN 추가
-kubectl -n kube-system get cm kubeadm-config -o jsonpath='{.data.ClusterConfiguration}' > /tmp/kubeadm-cluster-config.yaml
-# (apiServer.certSANs에 VIP 추가 + controlPlaneEndpoint: <VIP>:6443 append 후)
+# 1) 현재 kubeadm-config ConfigMap 내용을 파일로 꺼낸다
+kubectl -n kube-system get cm kubeadm-config \
+  -o jsonpath='{.data.ClusterConfiguration}' \
+  > /tmp/kubeadm-cluster-config.yaml
+
+# (파일을 열어 apiServer.certSANs에 VIP 추가 + controlPlaneEndpoint: <VIP>:6443 append)
+
+# 수정한 내용으로 ConfigMap을 다시 적용한다
 kubectl -n kube-system create cm kubeadm-config \
   --from-file=ClusterConfiguration=/tmp/kubeadm-cluster-config.yaml \
   --dry-run=client -o yaml | kubectl apply -f -
 
-# 2) apiserver 인증서를 새 SAN 포함해서 강제 재발급 (기존 파일이 있으면 kubeadm이 건너뛰므로 지워야 함)
+# 2) 기존 apiserver 인증서를 지운다 (남아있으면 kubeadm이 재발급을 건너뜀)
 rm /etc/kubernetes/pki/apiserver.crt /etc/kubernetes/pki/apiserver.key
+
+# 새 SAN(VIP)을 포함해서 apiserver 인증서를 재발급한다
 kubeadm init phase certs apiserver --config /tmp/kubeadm-cluster-config.yaml
 
-# 3) apiserver 정적 파드 강제 재기동 (매니페스트를 잠깐 옮겼다 되돌리면 kubelet이 재기동시킴)
+# 3) apiserver 정적 파드 매니페스트를 잠깐 다른 곳으로 옮긴다 (kubelet이 사라진 걸 감지하게)
 mv /etc/kubernetes/manifests/kube-apiserver.yaml /tmp/kube-apiserver.yaml.tmp
+
+# kubelet이 정적 파드가 없어진 걸 인식할 시간을 준다
 sleep 5
+
+# 매니페스트를 원위치시켜 kubelet이 새 인증서로 재기동하게 한다
 mv /tmp/kube-apiserver.yaml.tmp /etc/kubernetes/manifests/kube-apiserver.yaml
 
-# 4) admin.conf(사람용 kubeconfig)의 server 주소를 VIP로 변경
+# 4) admin.conf(사람용 kubeconfig)의 server 주소를 VIP로 바꾼다
 sed -i "s#https://<이 노드 IP>:6443#https://<VIP>:6443#" /etc/kubernetes/admin.conf
 
-# 5) kube-public/cluster-info도 VIP로 갱신 (안 하면 join 명령이 계속 옛 고정 IP를 가리킴)
-kubectl -n kube-public get cm cluster-info -o jsonpath='{.data.kubeconfig}' > /tmp/cluster-info-kubeconfig.yaml
+# 5) join 명령이 참조하는 cluster-info ConfigMap 내용을 꺼낸다
+kubectl -n kube-public get cm cluster-info \
+  -o jsonpath='{.data.kubeconfig}' \
+  > /tmp/cluster-info-kubeconfig.yaml
+
+# 그 안의 server 주소도 VIP로 바꾼다
 sed -i "s#server: https://<이 노드 IP>:6443#server: https://<VIP>:6443#" /tmp/cluster-info-kubeconfig.yaml
+
+# 수정한 내용으로 cluster-info ConfigMap을 다시 적용한다 (안 하면 join 명령이 계속 옛 고정 IP를 가리킴)
 kubectl -n kube-public create cm cluster-info \
   --from-file=kubeconfig=/tmp/cluster-info-kubeconfig.yaml \
   --dry-run=client -o yaml | kubectl apply -f -
