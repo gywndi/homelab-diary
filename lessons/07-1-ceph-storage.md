@@ -99,7 +99,7 @@ sudo ufw reload
 3노드(chan08/chan09/llm001) 모두에서 동일하게 실행한다.
 
 ### 클러스터 부트스트랩(mon+mgr)
-- 설명: cephadm 설치 후 클러스터를 만든다. 부트스트랩 직후 레거시 cephx 키(krbd 호환)를 허용하도록 설정한다 — 이유는 아래 "알려진 이슈" 참고. chan08(관리 노드) 1회만 실행한다.
+- 설명: cephadm 설치 후 클러스터를 만든다. `--mon-ip`는 첫 mon 하나를 어디서 띄울지 정하는 값이라, 이 시점엔 mon이 chan08 하나뿐이다 — 다음 "클러스터에 호스트 추가" 단계에서 자동으로 3-way로 확장된다. `--mon-ip`는 도메인이 아니라 실제 IP만 받는다 — mon끼리 주고받는 monmap 항목 자체가 항상 IP:포트 리터럴이고(`ceph mon dump`로 확인 가능), DNS가 mon 간 통신의 전제조건이 되는 순환 의존을 피하기 위해서다(k8s Node의 InternalIP가 도메인이 아니라 IP만 받는 것과 같은 이유). 부트스트랩 직후 레거시 cephx 키(krbd 호환)를 허용하도록 설정한다 — 이유는 아래 "알려진 이슈" 참고. chan08(관리 노드) 1회만 실행한다.
 - 스크립트: [`14-cephadm-bootstrap.sh`](../scripts/07-ceph-storage/14-cephadm-bootstrap.sh)
 ```bash
 # cephadm 설치 스크립트 다운로드(Squid 릴리스)
@@ -136,7 +136,7 @@ sudo apt-get install -y podman
 ```
 
 ### 클러스터에 호스트 추가
-- 설명: 나머지 노드를 클러스터에 추가한다. cephadm이 root로 SSH 접속해 데몬을 배포하므로 클러스터 SSH 공개키를 대상 호스트의 root에 먼저 넣는다. chan09, llm001 각각 실행한다.
+- 설명: 나머지 노드를 클러스터에 추가한다. cephadm이 root로 SSH 접속해 데몬을 배포하므로 클러스터 SSH 공개키를 대상 호스트의 root에 먼저 넣는다. chan09, llm001 각각 실행한다. 호스트를 추가하면 cephadm 기본 mon 배치 정책에 따라 mon도 자동으로 그 호스트에 같이 떠서, 별도 명령 없이도 mon이 3-way(chan08/chan09/llm001)로 확장되고 `/etc/ceph/ceph.conf`의 `mon_host`도 자동으로 갱신된다 — 부트스트랩 시점의 chan08 단일 mon 의존은 이 단계로 해소된다. k8s가 VIP 없이 고정 IP로 시작하면 나중에 인증서 재발급까지 필요한 것과 달리([`02-k8s-cluster.md`의 관련 알려진 이슈](02-k8s-cluster.md#알려진-이슈-고정-ip로-시작하면-나중에-힘들다)), Ceph는 호스트만 추가하면 저절로 해결된다.
 - 스크립트: [`15-cephadm-add-host.sh`](../scripts/07-ceph-storage/15-cephadm-add-host.sh)
 ```bash
 # 클러스터 SSH 공개키를 대상 호스트 root에 등록
