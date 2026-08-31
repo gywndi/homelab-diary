@@ -29,6 +29,7 @@ Ceph 자체는 k8s 워크로드가 아니라 다른 서비스가 의존하는 �
 - **OSD 파티션은 LVM 논리 볼륨으로 감싸서 등록한다.** cephadm의 표준 OSD 생성 경로(`ceph orch daemon add osd`)는 raw 파티션을 직접 못 받는다 — LVM(pvcreate/vgcreate/lvcreate)으로 한 겹 감싸야 받아준다.
 - **RGW VIP는 keepalived로, 인프라 대역에 둔다.** RGW가 k8s Service가 아니라서 MetalLB(k8s LoadBalancer용)를 못 쓴다. MySQL Stage 1/k8s API 서버 VIP와 같은 host-native VRRP 패턴(keepalived)을 재사용한다. VIP는 인프라 대역(`.20` 이하) — Ceph는 다른 서비스가 의존하는 핵심 인프라라 애플리케이션 VIP 대역(`.50~.99`)과 구분한다.
 - **k8s에서 RBD를 쓰려면 독립 ceph-csi를 붙인다.** MySQL 같은 k8s 워크로드는 여전히 PVC로 스토리지를 쓰고 싶어한다. Rook 대신 ceph-csi(RBD 플러그인)만 독립적으로 배포한다. k8s는 이 외부 클러스터의 "소비자" 역할만 하고, 클러스터 자체의 생애주기는 전혀 관리하지 않는다.
+- **cephadm의 SSH 접속 계정은 root가 아니라 chan(NOPASSWD sudo)으로 전환했다.** cephadm 기본값은 root SSH다. `ceph cephadm set-user chan`으로 바꾸면 sudo를 거쳐 같은 권한으로 동작하면서, root의 `authorized_keys`에는 아무 키도 안 남는다 — 권한 범위 자체는 NOPASSWD sudo 계정이라 root와 동등하지만(키가 털렸을 때 피해는 같음), 인증 로그에 "root"가 아니라 실제 계정명이 남아 감사성이 좋아진다.
 
 MySQL이 이 RBD 위에서 실제로 어떻게 재배포됐는지는 [MySQL을 Ceph RBD로 재배포](03-2-mysql-ceph-migration.md) 참고.
 
@@ -125,6 +126,11 @@ chmod +x /usr/local/bin/cephadm
 # 레거시 cephx 키(krbd 호환) 허용
 cephadm shell -- ceph mon set auth_allowed_ciphers "aes, aes256k"
 cephadm shell -- ceph mon set auth_preferred_cipher aes
+
+# cephadm SSH 대상 계정을 root 대신 chan(NOPASSWD sudo)으로 전환
+CEPHPUB=$(cat /etc/ceph/ceph.pub)
+echo "$CEPHPUB" >> ~/.ssh/authorized_keys
+cephadm shell -- ceph cephadm set-user chan
 ```
 
 ### 컨테이너 런타임 설치
@@ -136,12 +142,12 @@ sudo apt-get install -y podman
 ```
 
 ### 클러스터에 호스트 추가
-- 설명: 나머지 노드를 클러스터에 추가한다. cephadm이 root로 SSH 접속해 데몬을 배포하므로 클러스터 SSH 공개키를 대상 호스트의 root에 먼저 넣는다. chan09, llm001 각각 실행한다. 호스트를 추가하면 cephadm 기본 mon 배치 정책에 따라 mon도 자동으로 그 호스트에 같이 떠서, 별도 명령 없이도 mon이 3-way(chan08/chan09/llm001)로 확장되고 `/etc/ceph/ceph.conf`의 `mon_host`도 자동으로 갱신된다 — 부트스트랩 시점의 chan08 단일 mon 의존은 이 단계로 해소된다. k8s가 VIP 없이 고정 IP로 시작하면 나중에 인증서 재발급까지 필요한 것과 달리([`02-k8s-cluster.md`의 관련 알려진 이슈](02-k8s-cluster.md#알려진-이슈-고정-ip로-시작하면-나중에-힘들다)), Ceph는 호스트만 추가하면 저절로 해결된다.
+- 설명: 나머지 노드를 클러스터에 추가한다. cephadm은 SSH로 각 호스트에 데몬을 배포하는데, root가 아니라 chan(NOPASSWD sudo)으로 접속하도록 위 부트스트랩 단계에서 이미 전환해뒀다 — 그래서 클러스터 SSH 공개키도 chan의 `authorized_keys`에 등록한다. chan09, llm001 각각 실행한다. 호스트를 추가하면 cephadm 기본 mon 배치 정책에 따라 mon도 자동으로 그 호스트에 같이 떠서, 별도 명령 없이도 mon이 3-way(chan08/chan09/llm001)로 확장되고 `/etc/ceph/ceph.conf`의 `mon_host`도 자동으로 갱신된다 — 부트스트랩 시점의 chan08 단일 mon 의존은 이 단계로 해소된다. k8s가 VIP 없이 고정 IP로 시작하면 나중에 인증서 재발급까지 필요한 것과 달리([`02-k8s-cluster.md`의 관련 알려진 이슈](02-k8s-cluster.md#알려진-이슈-고정-ip로-시작하면-나중에-힘들다)), Ceph는 호스트만 추가하면 저절로 해결된다.
 - 스크립트: [`15-cephadm-add-host.sh`](../scripts/07-ceph-storage/15-cephadm-add-host.sh)
 ```bash
-# 클러스터 SSH 공개키를 대상 호스트 root에 등록
+# 클러스터 SSH 공개키를 대상 호스트 chan 계정에 등록
 PUBKEY=$(cat /etc/ceph/ceph.pub)
-ssh chan@10.5.5.9 "sudo mkdir -p /root/.ssh && echo '${PUBKEY}' | sudo tee -a /root/.ssh/authorized_keys > /dev/null && sudo chmod 700 /root/.ssh && sudo chmod 600 /root/.ssh/authorized_keys"
+ssh chan@10.5.5.9 "echo '${PUBKEY}' >> ~/.ssh/authorized_keys"
 
 # 클러스터에 호스트 추가
 cephadm shell -- ceph orch host add chan09 10.5.5.9

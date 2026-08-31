@@ -46,4 +46,11 @@ echo "== 레거시 cephx 키(aes, krbd 호환) 허용 =="
 cephadm shell -- ceph mon set auth_allowed_ciphers "aes, aes256k"
 cephadm shell -- ceph mon set auth_preferred_cipher aes
 
-echo "완료: mon+mgr 부트스트랩. 다음 단계: 14-cephadm-add-host.sh로 나머지 노드 추가"
+echo "== cephadm SSH 대상 계정을 root 대신 chan(NOPASSWD sudo)으로 전환 =="
+# root SSH 로그인 경로를 안 열어두려고 chan을 쓴다 — chan은 01-provision에서
+# 이미 NOPASSWD sudo가 걸려 있다(lessons/01-provision.md 참고).
+CEPHPUB=$(cat /etc/ceph/ceph.pub)
+grep -qF "$CEPHPUB" ~/.ssh/authorized_keys 2>/dev/null || echo "$CEPHPUB" >> ~/.ssh/authorized_keys
+cephadm shell -- ceph cephadm set-user chan
+
+echo "완료: mon+mgr 부트스트랩. 다음 단계: 15-cephadm-add-host.sh로 나머지 노드 추가"
