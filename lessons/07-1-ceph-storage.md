@@ -196,7 +196,8 @@ sudo ./21-cephadm-ec-pool-example.sh test-ec-rbd 2 1
 핵심 부분:
 ```bash
 # EC 프로필 생성 (장애 도메인은 host — OSD 개수가 아니라 노드 개수가 k+m의 상한)
-cephadm shell -- ceph osd erasure-code-profile set test-ec-rbd-ec-profile k=2 m=1 crush-failure-domain=host
+cephadm shell -- ceph osd erasure-code-profile set test-ec-rbd-ec-profile \
+  k=2 m=1 crush-failure-domain=host
 
 # EC 풀 생성
 cephadm shell -- ceph osd pool create test-ec-rbd erasure test-ec-rbd-ec-profile
@@ -212,7 +213,8 @@ cephadm shell -- ceph osd pool create test-ec-rbd-meta 1 1 replicated
 cephadm shell -- rbd pool init test-ec-rbd-meta
 
 # 실제 데이터는 EC 풀에, 이미지 자체(헤더)는 메타데이터 풀에
-cephadm shell -- rbd create --size 10G --data-pool test-ec-rbd test-ec-rbd-meta/bench
+cephadm shell -- rbd create --size 10G \
+  --data-pool test-ec-rbd test-ec-rbd-meta/bench
 ```
 RGW(`buckets.data`)는 이 메타데이터 풀 단계가 필요 없다 — RGW 자체가 오브젝트를 통째로 쓰고 그대로 두는 방식이라 부분 덮어쓰기 지원이 애초에 필요 없기 때문이다.
 

@@ -26,7 +26,8 @@ fi
 PROFILE="${POOL}-ec-profile"
 
 echo "== EC 프로필 생성 (장애 도메인은 host — OSD 개수가 아니라 노드 개수가 k+m의 상한) =="
-cephadm shell -- ceph osd erasure-code-profile set "$PROFILE" k="$K" m="$M" crush-failure-domain=host
+cephadm shell -- ceph osd erasure-code-profile set "$PROFILE" \
+  k="$K" m="$M" crush-failure-domain=host
 
 echo "== EC 풀 생성 =="
 cephadm shell -- ceph osd pool create "$POOL" erasure "$PROFILE"
@@ -42,5 +43,6 @@ RBD로 쓸 경우 추가로 필요 (EC 풀은 부분 덮어쓰기를 기본 지�
   cephadm shell -- ceph osd pool set ${POOL} allow_ec_overwrites true
   cephadm shell -- ceph osd pool create ${POOL}-meta 1 1 replicated
   cephadm shell -- rbd pool init ${POOL}-meta
-  cephadm shell -- rbd create --size <크기> --data-pool ${POOL} ${POOL}-meta/<이미지 이름>
+  cephadm shell -- rbd create --size <크기> \
+    --data-pool ${POOL} ${POOL}-meta/<이미지 이름>
 EOF
