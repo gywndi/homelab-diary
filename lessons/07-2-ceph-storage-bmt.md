@@ -27,7 +27,7 @@
 
 size=3 replication 쓰기는 클라이언트→primary OSD로 들어온다. 그다음 primary가 나머지 2개 replica로 다시 내보내야 완료 처리된다. primary 노드의 NIC 하나가 "받는 트래픽 + 내보내는 트래픽 ×2"를 전부 같은 1Gbps 파이프로 처리해야 한다. 그래서 원본 링크 속도(iperf3 실측 117MB/s)보다 실제 쓰기 처리량(86MB/s)이 낮고 지연도 커진다.
 
-## erasure coding vs replication — 실측 (2026-08-31)
+## erasure coding vs replication — 실측 (2026-08-31, 2026-09-03 추가)
 
 개념 설명은 [concepts/02-ceph.md의 erasure coding 항목](../concepts/02-ceph.md#erasure-coding--replication보다-용량-효율적인-대안) 참고. 3노드에 임시 테스트 풀을 만들어 실측했다(측정 후 전부 삭제).
 
@@ -51,7 +51,21 @@ replica 3과 비교하면 EC 쓰기가 27% 빠른 것처럼 보이지만, replic
 
 같은 1대 장애 허용 수준끼리 비교해도(size=2 vs EC k=2,m=1) EC가 **18배 느리다.** read-modify-write 페널티(조각 일부를 고칠 때 관련 조각을 다시 읽고 패리티를 재계산하는 비용)가 이론적 예상보다 훨씬 크게 실측됐다 — 저장 공간은 25%(size=2 대비) 아끼지만 랜덤 쓰기 성능은 20분의 1 수준으로 떨어진다.
 
-**결론**: 순차 쓰기·읽기(오브젝트 통째로 쓰고 그대로 두는 패턴, RGW 워크로드에 가까움)에서는 EC와 replicated의 성능 차가 크지 않다(같은 장애 허용 기준 쓰기 +6.5%/읽기 -24%) — 이 정도면 저장 공간 절약(size=2 대비 25%)이 실이득으로 남는다. 반면 RBD처럼 랜덤 소규모 쓰기가 잦은 워크로드에는 이 클러스터 규모(3노드)에서 EC가 전혀 맞지 않는다(18배 느림). MySQL/KVM(RBD)은 지금처럼 replicated를 유지하는 게 맞고, RGW(오브젝트) 쪽은 EC 전환을 검토해볼 만하다.
+**소규모 오브젝트 순차 쓰기 — 로그 적재 패턴** (`rados bench`, 64KB 오브젝트, 20초 — access log를 주기적으로 배치 업로드하는 실제 파이프라인 패턴 시뮬레이션)
+
+| 방식 | 대역폭 | IOPS | 지연 |
+|---|---|---|---|
+| replicated size=3 | **48.9 MB/s** | 782 | 최대 74ms |
+| EC k=2,m=1 | 37.5 MB/s | 599 | 최대 2.1초, 순간 대역폭 0 발생 |
+
+4MB 오브젝트에서는 EC가 빨랐지만 64KB로 작아지면 **역전된다**(replica3가 30% 빠름) — 오브젝트가 작을수록 EC의 조각 분할·패리티 계산 오버헤드가 전송량 절감분보다 커진다. 지연도 EC 쪽이 훨씬 불안정하다.
+
+**RADOS append(한 오브젝트에 계속 이어쓰기)** (`rados append`, 45바이트 줄 500회)
+
+- EC 풀은 기본적으로 append가 거부된다(`Operation not supported`) — `allow_ec_overwrites true`를 켜야 동작한다.
+- 켜도 replicated보다 25% 느리다(61.6ms vs 49.1ms/append) — RBD 랜덤쓰기(18배)보다는 훨씬 덜하지만 손해는 손해다.
+
+**결론**: 순차 쓰기·읽기는 오브젝트 크기에 따라 결과가 갈린다 — MB급 큰 오브젝트(4MB)에서는 EC가 유리하지만(같은 장애 허용 기준 쓰기 +6.5%/읽기 -24%, 저장 공간 25% 절약이 실이득), 로그 배치처럼 작은 오브젝트(64KB)에서는 오히려 EC가 손해다. 진짜 append는 EC에서 기본 차단되고 켜도 25% 느리다. RBD처럼 랜덤 소규모 쓰기가 잦은 워크로드에는 이 클러스터 규모(3노드)에서 EC가 전혀 맞지 않는다(18배 느림). MySQL/KVM(RBD)은 지금처럼 replicated를 유지하는 게 맞고, RGW(오브젝트) 쪽은 배치를 MB급으로 크게 모아 쓰는 워크로드에 한해 EC 전환을 검토해볼 만하다.
 
 ## 남아있는 리스크
 
@@ -68,6 +82,8 @@ replica 3과 비교하면 EC 쓰기가 27% 빠른 것처럼 보이지만, replic
 - EC 프로필: `ceph osd erasure-code-profile set <이름> k=2 m=1 crush-failure-domain=host`
 - EC 풀 생성: `ceph osd pool create <이름> erasure <프로필>` (RBD로 쓰려면 `allow_ec_overwrites true` + 별도 복제 메타데이터 풀 필요, RGW는 `buckets.data`를 EC로 미리 만들어두면 그대로 씀)
 - RBD 랜덤쓰기 벤치: `rbd bench --io-type write --io-pattern rand --io-size 4K --io-total 200M <풀>/<이미지>`
+- 소규모 오브젝트 순차 쓰기(로그 배치 패턴): `rados bench -p <풀> 20 write -b 65536 --no-cleanup`
+- RADOS append: `rados -p <풀> append <오브젝트명> <파일>` (EC는 `allow_ec_overwrites true` 없이는 거부됨)
 
 ---
 
