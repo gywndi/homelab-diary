@@ -22,7 +22,7 @@ Ceph 자체는 k8s 워크로드가 아니라 다른 서비스가 의존하는 �
 
 - **새 장비 없이 기존 3노드 재구성.** Ceph는 기본값으로 데이터를 3벌 복제한다(3-replica). 마침 물리 노드가 정확히 3대라 딱 맞는다.
 - **RBD(블록)와 RGW(오브젝트)의 역할을 분리했다.** 블록 스토리지는 일반 디스크처럼 운영체제에 통째로 마운트해 파일시스템을 얹는 방식이다. 오브젝트 스토리지는 파일 하나하나를 HTTP API(S3)로 읽고 쓰는 방식이다. 접근 패턴이 다르다 — KVM VM 디스크와 MySQL 데이터는 항상 한 프로세스만 배타적으로 쓰는 블록 데이터라 RBD를 쓴다. 오브젝트 API로 접근하는 워크로드는 RGW를 쓴다.
-- **CephFS(MDS)는 배제했다.** CephFS는 Ceph 위에 파일시스템을 얹어주는 세 번째 방식이다. 여러 클라이언트가 동시에 같은 디렉터리를 공유할 수 있다. MDS(메타데이터 서버)라는 별도 데몬이 필요하다. 지금은 여러 파드가 동시에 같은 파일을 읽고 써야 하는 워크로드(k8s에서는 RWX, ReadWriteMany라 부름)가 없다. MDS를 상시 구동할 비용을 32G/노드 예산에서 정당화할 근거가 없었다. RWX가 필요해지면 NAS(NFS)로 커버할 계획이다.
+- **CephFS(MDS)는 로그 적재(RWX, 실시간 append) 용도로 추가했다.** 처음엔 RWX 워크로드가 없어서 배제했지만([`concepts/02-ceph.md`](../concepts/02-ceph.md) 참고), 여러 파드가 같은 로그 경로에 동시에 안전하게 append해야 하는 요구가 생겨 MDS를 추가했다. 로그처럼 파일 수가 적고 메타데이터 부하가 낮은 워크로드라 MDS 캐시 부담이 크지 않다. NFS(NAS)는 여전히 백업 타깃·잠금이 필요 없는 RWX 용도로 남는다 — 진짜 동시 append/잠금이 필요하면 CephFS, 아니면 NFS로 구분한다.
 - **NAS를 OSD 백엔드로 쓰지 않는다.** OSD는 디스크 하나당 데이터를 저장하는 Ceph 데몬이다(아래 "각 컴포넌트가 뭘 하는지" 참고). 네트워크 스토리지 위에 또 네트워크 스토리지를 얹으면 지연/장애 시나리오가 한 겹 더 지저분해진다. NAS는 백업 타깃과 향후 NFS StorageClass 용도로만 쓰기로 좁혔다.
 - **KVM도 RBD 위에 올린다.** libvirt(KVM을 관리하는 가상화 툴킷)가 RBD를 네이티브 스토리지 풀로 지원한다. 다만 libvirt 도메인 XML(VM 정의 파일)을 노드 간 자동 동기화해주는 장치는 없다. 수동 절차로 남아있다.
 - **cephadm으로 베어메탈에 직접 배포한다.** k8s CRD로 선언적으로 관리하는 방식(Rook 같은 오퍼레이터)도 있지만, 그러면 Ceph의 생사가 k8s 컨트롤플레인에 묶인다. cephadm은 각 노드에 SSH로 접속해 컨테이너+systemd로 데몬을 직접 배포·관리한다. k8s가 죽어도, 심지어 k8s를 통째로 밀고 다시 세워도 Ceph는 영향받지 않는다.
@@ -193,6 +193,30 @@ cephadm shell -- ceph osd pool set default.rgw.buckets.data size 2
 cephadm shell -- ceph osd pool set default.rgw.buckets.data min_size 1
 ```
 
+### CephFS 볼륨 생성 (로그 적재용 RWX)
+- 설명: 여러 파드가 같은 로그 경로에 동시에 안전하게 append할 수 있어야 해서 추가했다. `ceph fs volume create`가 메타데이터/데이터 풀 생성과 MDS 3개(active 1 + standby 2, 3노드 전부) 배치를 한 번에 처리한다. 개념은 [concepts/02-ceph.md](../concepts/02-ceph.md#cephfs), 성능/내구성 조사는 [work/cephfs-log-ingestion.md](../work/cephfs-log-ingestion.md)(진행 중) 참고.
+- 스크립트: [`22-cephadm-cephfs.sh`](../scripts/07-ceph-storage/22-cephadm-cephfs.sh)
+```bash
+sudo ./22-cephadm-cephfs.sh logfs chan08,chan09,llm001
+```
+핵심 부분:
+```bash
+# CephFS 볼륨 생성 (메타데이터/데이터 풀 + MDS 자동 배치)
+cephadm shell -- ceph fs volume create logfs --placement="chan08,chan09,llm001"
+
+# MDS 캐시 한도 1GB로 설정 (로그처럼 파일 수가 적은 워크로드엔 충분)
+cephadm shell -- ceph config set mds mds_cache_memory_limit 1073741824
+```
+클라이언트 인증(최소 권한, `logfs` 안에서만 rw):
+```bash
+cephadm shell -- ceph fs authorize logfs client.logtest / rw
+```
+커널 클라이언트로 마운트:
+```bash
+sudo mount -t ceph logtest@<fsid>.logfs=/ /mnt/logfs \
+  -o secretfile=/etc/ceph/logtest.secret,mon_addr=10.5.5.8:6789/10.5.5.9:6789/10.5.5.10:6789
+```
+
 ### erasure coding(EC) 풀 만들기 — 참고용, 지금은 안 씀
 - 설명: replicated 대신 EC로 풀을 만드는 방법. 개념은 [concepts/02-ceph.md](../concepts/02-ceph.md#erasure-coding--replication보다-용량-효율적인-대안), 실측은 [07-2-ceph-storage-bmt.md](07-2-ceph-storage-bmt.md#erasure-coding-vs-replication--실측-2026-08-31) 참고. 지금 운영 중인 `rbd-pool`/`default.rgw.buckets.data`는 둘 다 replicated 그대로다 — RBD(rbd-pool)는 실측상 EC가 전혀 안 맞고(랜덤 쓰기 18배 느림), RGW(buckets.data) 전환은 검토 중이라 아직 적용 안 했다.
 - 스크립트: [`21-cephadm-ec-pool-example.sh`](../scripts/07-ceph-storage/21-cephadm-ec-pool-example.sh)
@@ -347,6 +371,7 @@ cephadm shell -- ceph -s        # 전체 상태(HEALTH_OK/WARN)
 cephadm shell -- ceph osd tree  # OSD별 노드 배치/생존 확인
 cephadm shell -- ceph osd df    # OSD별 사용률/PG(데이터를 나눠 OSD에 분산 배치하는 단위) 분산 균형도
 cephadm shell -- ceph orch ps   # 데몬(mon/mgr/osd/rgw) 배치 현황
+cephadm shell -- ceph fs status logfs   # CephFS active/standby MDS, 풀 사용량
 ```
 
 ## 검증 이력
@@ -357,6 +382,8 @@ cephadm shell -- ceph orch ps   # 데몬(mon/mgr/osd/rgw) 배치 현황
 3. krbd 매핑 실제 테스트(`/dev/rbd0` 생성) + k8s 파드에서 ceph-csi PVC 마운트·쓰기·읽기 확인
 4. MySQL을 새 `ceph-csi-rbd` StorageClass로 재배포, 원본 백업(mysqldump) 전체 복원 후 정확한 행 수로 데이터 무결성 확인
 5. StarRocks shared-data(FE+CN, RGW 기반)·shared-nothing(FE+BE3, 로컬 XFS 기반) 양쪽 클러스터 재배포, 테이블 생성/쓰기/조회로 end-to-end 확인(RGW 버킷 오브젝트 수 증가로 실제 저장 확인)
+
+2026-09-03 CephFS(`logfs`) 검증: 커널 클라이언트로 마운트 후 500줄 append 정상 반영 확인, active MDS 강제 재시작 중 쓰기 시도해도 에러/데이터 유실 없이 standby로 failover되고 재시작된 MDS가 standby로 복귀하는 것까지 확인.
 
 ---
 
