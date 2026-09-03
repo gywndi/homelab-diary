@@ -111,7 +111,7 @@ DSM 웹 로그인이나 SMB와 달리, NFS export는 아이디/비밀번호 없�
 `nfsvers=4`나 `4.1`로 StorageClass를 만들면 `mount.nfs: Protocol not supported`만 나오고 더 자세한 원인은 안 보인다. NFSv3로 낮추면 그제서야 진짜 원인(`rpc.statd is not running`)이 드러난다 — 이 NAS 환경에서는 그냥 처음부터 `nfsvers=3, nolock` 조합을 쓰는 게 시간을 아낀다.
 
 ### CSI 노드 파드 안에는 `rpc.statd`가 없다
-NFSv3의 파일 잠금(`NLM`, Network Lock Manager)은 `rpc.statd`가 있어야 동작하는데, `csi-driver-nfs`의 노드 컨테이너는 이걸 안 띄운다. `nolock` 마운트 옵션으로 잠금 기능 자체를 포기하면 우회된다 — 여러 워크로드가 같은 파일을 동시에 잠그며 쓰는 게 아니라면 실무상 문제없다.
+NFSv3의 파일 잠금(`NLM`, Network Lock Manager)은 `rpc.statd`가 있어야 동작하는데, `csi-driver-nfs`의 노드 컨테이너는 이걸 안 띄운다. `nolock` 마운트 옵션으로 잠금 기능 자체를 포기하면 우회된다 — 여러 워크로드가 같은 파일을 동시에 잠그며 쓰는 게 아니라면 실무상 문제없다. 예를 들어 여러 파드가 로그를 이 RWX 볼륨에 적재하려면, 서비스마다 다른 파일/디렉터리에 쓰게 해서 경합 자체를 없애야 한다 — 여러 파드가 같은 파일 하나에 동시에 append하는 구성은 잠금이 없어 줄이 섞이거나 깨질 수 있다.
 
 ### StorageClass의 `parameters`는 불변이다
 `share` 경로를 바꾸려고 기존 StorageClass에 `kubectl apply`만 다시 하면 `field is immutable` 에러가 난다 — `parameters` 아래 값은 생성 후 수정이 안 된다. 삭제하고 새로 만들어야 한다(이미 그 StorageClass로 만들어진 PV는 `reclaimPolicy: Retain`이라 영향받지 않는다).

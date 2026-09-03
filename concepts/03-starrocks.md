@@ -129,6 +129,8 @@ mysql -h fe.starrocks.svc.cluster.local -P 9030 -u root -e "SHOW COMPUTE NODES\G
 | Unique Key | 같은 키가 들어오면 마지막 값으로 덮어쓴다 | 최신 상태만 필요한 테이블 |
 | Primary Key | Unique Key + 실시간 UPDATE/DELETE 지원 | MySQL처럼 갱신이 잦은 테이블(CRUD 벤치마크에 사용) |
 
+Primary Key의 UPDATE/DELETE도 기존 Segment를 고쳐 쓰지 않는다. PK 인덱스가 "이 키의 최신 값이 어느 Rowset에 있는지"를 추적하고, UPDATE는 새 값을 새 Rowset에 쓴 뒤 옛 Rowset의 해당 행을 delete vector(삭제 표시 비트맵)로 논리 삭제 처리한다. 조회는 항상 PK 인덱스가 가리키는 최신 버전만 읽는다. 죽은 행은 Compaction이 정리한다.
+
 ## SQL 실행 흐름
 
 ```mermaid
