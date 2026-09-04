@@ -23,6 +23,21 @@ k8s StatefulSet으로 3노드(chan08/chan09/llm001) 전부에 파드 하나씩 �
 ### Vault 배포
 - 설명: 네임스페이스, 설정(ConfigMap), 헤드리스 Service(Raft 피어 통신, 8201) + 클라이언트 API Service(8200), StatefulSet(3 replica)을 만든다. TLS는 비활성(`tls_disable = 1`) — 테스트 목적으로 범위를 좁혔다(아래 "알려진 이슈" 참고).
 - 스크립트: [`01-deploy-vault.sh`](../scripts/11-vault/01-deploy-vault.sh)
+
+각 k8s 리소스의 역할:
+
+| 리소스 | 역할 |
+|---|---|
+| Namespace(`vault`) | 다른 네임스페이스(mysql, starrocks 등)와 리소스를 분리하는 구분일 뿐, 기능은 없다 |
+| ConfigMap(`vault-config`) | Vault 서버가 시작할 때 읽는 HCL 설정 파일(`vault.hcl`)의 내용 |
+| 헤드리스 Service(`vault-internal`, `clusterIP: None`) | 파드마다 개별 DNS 이름(`vault-0.vault-internal...`)을 부여 — Raft가 "아무 노드나"가 아니라 특정 노드(vault-0 등)를 지목해서 통신해야 해서 필요하다. 포트 8200(API)/8201(Raft 피어 복제) |
+| 일반 Service(`vault`) | 클라이언트가 "아무 파드나" 골라 API 요청을 보내는 로드밸런싱 진입점(8200) — standby가 받으면 내부적으로 leader에 포워딩 |
+| StatefulSet | 파드마다 고유 이름(vault-0/1/2)과 고유 데이터가 필요해서 Deployment 대신 사용. 파드를 순서대로(앞이 Ready여야 다음 생성) 만든다 |
+| `volumeClaimTemplates`(PVC) | 파드마다 독립된 볼륨을 자동 생성(`data-vault-0` 등) — Vault의 실제 암호화 데이터가 저장되는 곳(`ceph-csi-rbd` 기반이라 최종적으로 Ceph에 저장됨) |
+| `env.POD_NAME`(Downward API) | 파드가 "자기 자신의 이름"을 환경변수로 알아내는 k8s 기능 — vault-0 파드 안에선 `POD_NAME=vault-0` |
+| `readinessProbe`(`/v1/sys/health`) | sealed 상태면 실패 응답 — Ready 안 됨 → StatefulSet이 다음 파드를 안 만듦(unseal과 파드 생성 순서가 맞물리는 이유) |
+| `securityContext.capabilities: IPC_LOCK` | 시크릿이 디스크 스왑으로 새지 않게 하는 `mlock`을 컨테이너가 쓸 수 있게 허용(`disable_mlock = false`와 짝) |
+
 ```bash
 ./01-deploy-vault.sh
 ```
@@ -122,6 +137,45 @@ vault write pki/roles/test-role \
 ```
 발급은 `vault write pki/issue/test-role common_name=<이름>.vault-test.internal ttl=1h` — 응답에 인증서(`certificate`)와 개인키(`private_key`)가 그대로 들어있다.
 
+### Kubernetes 인증 방식 구성
+- 설명: 파드가 정적 Vault 토큰을 설정 파일에 박아 넣는 대신, 자기 자신의 ServiceAccount 토큰으로 Vault에 로그인하게 한다. Vault가 그 토큰이 진짜인지 k8s TokenReview API로 확인해야 해서, Vault 자신의 ServiceAccount에 `system:auth-delegator` 클러스터롤을 위임한다.
+- 스크립트: [`05-configure-k8s-auth.sh`](../scripts/11-vault/05-configure-k8s-auth.sh)
+```bash
+./05-configure-k8s-auth.sh <root token>
+```
+핵심 부분:
+```bash
+# Vault가 TokenReview API를 호출할 수 있게 RBAC 위임
+kubectl create clusterrolebinding vault-auth-delegator \
+  --clusterrole=system:auth-delegator \
+  --serviceaccount=vault:default
+
+# kubernetes 인증 방식 활성화 — vault-0 자신의 SA 토큰/CA로 같은 클러스터를 가리킴
+vault auth enable kubernetes
+vault write auth/kubernetes/config \
+  kubernetes_host="https://kubernetes.default.svc:443" \
+  kubernetes_ca_cert=@/var/run/secrets/kubernetes.io/serviceaccount/ca.crt \
+  token_reviewer_jwt=@/var/run/secrets/kubernetes.io/serviceaccount/token
+
+# 정책: 이 두 경로만 읽기 허용
+vault policy write demo-readonly - <<EOF
+path "secret/data/demo/app" { capabilities = ["read"] }
+path "database/creds/readonly" { capabilities = ["read"] }
+EOF
+
+# 역할: default 네임스페이스의 demo-app ServiceAccount만 이 정책을 받음
+vault write auth/kubernetes/role/demo-app \
+  bound_service_account_names=demo-app \
+  bound_service_account_namespaces=default \
+  policies=demo-readonly \
+  ttl=1h
+```
+파드 안에서 로그인:
+```bash
+vault write auth/kubernetes/login role=demo-app \
+  jwt=@/var/run/secrets/kubernetes.io/serviceaccount/token
+```
+
 ## 설계 결정
 
 - **Helm 대신 raw manifest.** 이 저장소의 다른 애드온(MetalLB, cert-manager)과 같은 방식 — `kubectl apply`로 직접 작성한 YAML을 쓴다. 명령 하나하나가 뭘 하는지 그대로 드러나는 쪽을 우선했다.
@@ -136,7 +190,6 @@ vault write pki/roles/test-role \
 
 MySQL/PKI에 쓴 것과 같은 패턴(관리자 권한 위임 → 템플릿 등록 → 요청 시 생성)을 다른 시스템에도 그대로 적용할 수 있다. 이 클러스터와 바로 연결지어볼 만한 것들:
 - **SSH 시크릿 엔진**: 3노드(chan08/chan09/llm001)에 정적 `authorized_keys` 대신 접속 시점마다 짧은 수명의 SSH 인증서를 발급 — [`07-1-ceph-storage.md`](07-1-ceph-storage.md)에서 cephadm의 SSH 계정을 root에서 chan으로 전환했던 것의 다음 단계로 볼 수 있다.
-- **Kubernetes 인증 방식**: 파드가 자기 자신의 ServiceAccount 토큰으로 Vault에 직접 로그인 — 앱마다 정적 Vault 토큰을 설정 파일에 박아 넣을 필요가 없어진다.
 - 반대로 **Ceph RGW(S3)는 안 된다** — Vault 공식 secrets engine 목록에 RGW 전용 플러그인이 없다(AWS IAM 엔진은 있지만 RGW는 그 API를 흉내만 낼 뿐이라 안 맞는다). 붙이려면 커스텀 플러그인이 필요한 수준이라 기본 제공 범위 밖이다.
 
 ## 알려진 이슈
@@ -168,6 +221,7 @@ kubectl -n vault exec vault-0 -- env VAULT_TOKEN=<root token> vault read databas
 3. **unseal 재현**: vault-2 파드를 강제 삭제 → 재기동된 파드가 다시 `Sealed: true`로 뜨는 것 확인 → 3개 키로 다시 unseal해서 정상화
 4. **동적 시크릿 end-to-end**: `database/creds/readonly`로 발급받은 자격증명으로 실제 MySQL 접속 성공(`vault_demo.items` SELECT), 권한 밖 스키마(`mysql`, `information_schema`) 접근은 거부됨 확인. `vault lease revoke`로 강제 회수 후 같은 자격증명으로 재접속 시도 시 `Access denied` 확인(Vault가 실제로 MySQL `DROP USER`까지 수행함을 증명)
 5. **PKI end-to-end**: root CA 생성(10년) → `test-role`로 리프 인증서 발급 → `openssl verify`로 체인 유효성 확인 → 그 인증서로 실제 TLS 서버(`openssl s_server`)를 띄우고 CA를 신뢰한 클라이언트로 접속 성공(HTTP 200), CA 없이는 접속 실패 확인 → `vault write pki/revoke`로 폐기 후 `state: revoked` 확인
+6. **Kubernetes 인증 end-to-end**: `default` 네임스페이스에 `demo-app` ServiceAccount를 가진 테스트 파드를 만들어 자기 토큰으로 로그인 → `demo-readonly` 정책이 붙은 Vault 토큰 발급 확인 → 그 토큰으로 `secret/data/demo/app` 읽기·`database/creds/readonly` 발급 둘 다 성공 → 정책 밖 동작(KV 목록 조회, 정책 생성)은 전부 403 거부 확인. 테스트 파드/ServiceAccount는 검증 후 삭제, Vault 쪽 설정(auth method/policy/role)은 재사용을 위해 남겨둠
 
 ---
 
