@@ -20,31 +20,6 @@ k8s StatefulSet으로 3노드(chan08/chan09/llm001) 전부에 파드 하나씩 �
 
 ## 스크립트 목록 (이름 순)
 
-### MySQL 동적 시크릿 구성
-- 설명: database secrets engine을 MySQL에 연결하고, 요청마다 새 계정을 만들어주는 `readonly` 역할을 정의한다. Vault 전용 MySQL 관리 계정(`CREATE USER` + 해당 스키마 `GRANT` 권한)도 이 스크립트가 같이 만든다.
-- 스크립트: [`03-configure-mysql-dynamic-secrets.sh`](../scripts/11-vault/03-configure-mysql-dynamic-secrets.sh)
-```bash
-./03-configure-mysql-dynamic-secrets.sh <root token> <MySQL vault 계정 비밀번호>
-```
-핵심 부분:
-```bash
-# database secrets engine 활성화 + MySQL 연결
-vault secrets enable database
-vault write database/config/mysql-demo \
-  plugin_name=mysql-database-plugin \
-  connection_url="{{username}}:{{password}}@tcp(mysql.mysql.svc.cluster.local:3306)/" \
-  allowed_roles="readonly" \
-  username="vault" \
-  password="<MySQL vault 계정 비밀번호>"
-
-# readonly 역할: 요청마다 이 SQL로 새 계정을 만든다 (기본 5분, 최대 1시간 TTL)
-vault write database/roles/readonly \
-  db_name=mysql-demo \
-  creation_statements="CREATE USER '{{name}}'@'%' IDENTIFIED BY '{{password}}'; GRANT SELECT ON vault_demo.* TO '{{name}}'@'%';" \
-  default_ttl="5m" \
-  max_ttl="1h"
-```
-
 ### Vault 배포
 - 설명: 네임스페이스, 설정(ConfigMap), 헤드리스 Service(Raft 피어 통신, 8201) + 클라이언트 API Service(8200), StatefulSet(3 replica)을 만든다. TLS는 비활성(`tls_disable = 1`) — 테스트 목적으로 범위를 좁혔다(아래 "알려진 이슈" 참고).
 - 스크립트: [`01-deploy-vault.sh`](../scripts/11-vault/01-deploy-vault.sh)
@@ -97,6 +72,56 @@ vault operator unseal <조각2>
 vault operator unseal <조각3>
 ```
 
+### MySQL 동적 시크릿 구성
+- 설명: database secrets engine을 MySQL에 연결하고, 요청마다 새 계정을 만들어주는 `readonly` 역할을 정의한다. Vault 전용 MySQL 관리 계정(`CREATE USER` + 해당 스키마 `GRANT` 권한)도 이 스크립트가 같이 만든다.
+- 스크립트: [`03-configure-mysql-dynamic-secrets.sh`](../scripts/11-vault/03-configure-mysql-dynamic-secrets.sh)
+```bash
+./03-configure-mysql-dynamic-secrets.sh <root token> <MySQL vault 계정 비밀번호>
+```
+핵심 부분:
+```bash
+# database secrets engine 활성화 + MySQL 연결
+vault secrets enable database
+vault write database/config/mysql-demo \
+  plugin_name=mysql-database-plugin \
+  connection_url="{{username}}:{{password}}@tcp(mysql.mysql.svc.cluster.local:3306)/" \
+  allowed_roles="readonly" \
+  username="vault" \
+  password="<MySQL vault 계정 비밀번호>"
+
+# readonly 역할: 요청마다 이 SQL로 새 계정을 만든다 (기본 5분, 최대 1시간 TTL)
+vault write database/roles/readonly \
+  db_name=mysql-demo \
+  creation_statements="CREATE USER '{{name}}'@'%' IDENTIFIED BY '{{password}}'; GRANT SELECT ON vault_demo.* TO '{{name}}'@'%';" \
+  default_ttl="5m" \
+  max_ttl="1h"
+```
+
+### PKI 인증서 발급
+- 설명: Vault를 자체 CA로 써서 짧은 수명의 TLS 인증서를 요청 시점에 발급한다. 기존 인프라(cert-manager 등)와 완전히 분리된 테스트용 CA다 — 여기서 발급한 인증서를 실제로 어딘가에 연결하지 않는 한 다른 컴포넌트에 영향이 없다.
+- 스크립트: [`04-configure-pki.sh`](../scripts/11-vault/04-configure-pki.sh)
+```bash
+./04-configure-pki.sh <root token>
+```
+핵심 부분:
+```bash
+# PKI 엔진 활성화 + 최대 TTL을 10년으로 (root CA 자체 수명용)
+vault secrets enable pki
+vault secrets tune -max-lease-ttl=87600h pki
+
+# root CA 생성 (10년)
+vault write -field=certificate pki/root/generate/internal \
+  common_name="vault-test.internal" \
+  ttl=87600h
+
+# 발급 규칙(role): 이 도메인과 서브도메인만, 최대 TTL 1시간
+vault write pki/roles/test-role \
+  allowed_domains="vault-test.internal" \
+  allow_subdomains=true \
+  max_ttl="1h"
+```
+발급은 `vault write pki/issue/test-role common_name=<이름>.vault-test.internal ttl=1h` — 응답에 인증서(`certificate`)와 개인키(`private_key`)가 그대로 들어있다.
+
 ## 설계 결정
 
 - **Helm 대신 raw manifest.** 이 저장소의 다른 애드온(MetalLB, cert-manager)과 같은 방식 — `kubectl apply`로 직접 작성한 YAML을 쓴다. 명령 하나하나가 뭘 하는지 그대로 드러나는 쪽을 우선했다.
@@ -104,6 +129,15 @@ vault operator unseal <조각3>
 - **PVC는 ceph-csi-rbd.** 파드마다 독립된 볼륨이 필요한(RWO) 구조라 이미 있는 StorageClass를 그대로 재사용했다.
 - **수동 unseal.** auto-unseal(외부 KMS)을 걸려면 클라우드 KMS가 없는 이 환경에선 별도 Vault(Transit 엔진 전용)를 하나 더 세워야 하는데, 그 Vault는 또 누가 unseal하냐는 재귀적 문제가 남는다([concepts/04-vault.md](../concepts/04-vault.md) 참고). 지금은 이 구조적 한계를 그대로 두고 수동 unseal로 운영한다.
 - **동적 시크릿 대상은 MySQL.** 이미 이 클러스터에 있는 워크로드라 새 인프라를 안 늘리고도 실제 자격증명 발급·회수를 검증할 수 있었다. Vault 전용 MySQL 관리 계정(`vault`@`%`)은 `CREATE USER`만 전역으로, 나머지는 `vault_demo` 스키마로 좁혔다.
+- **PKI role의 `allowed_domains`를 실제 서비스 도메인이 아니라 `vault-test.internal`로 잡았다.** 기존 인프라(cert-manager, `.home` 도메인)와 완전히 분리된 상태로 발급/검증/폐기까지 검증하려는 목적 — 실 서비스에 연결하는 결정은 별도로 한다.
+- **TTL을 항상 명시한다.** `default_ttl`/`max_ttl`을 안 정하면 무한이 아니라 Vault 시스템 전역 기본값(768시간=32일)으로 떨어진다 — "짧겠지"도 "무한이겠지"도 틀린 가정이라, 역할을 만들 때마다 값을 명시했다(MySQL `readonly`는 기본 5분/최대 1시간, PKI `test-role`은 최대 1시간).
+
+## 확장 가능성
+
+MySQL/PKI에 쓴 것과 같은 패턴(관리자 권한 위임 → 템플릿 등록 → 요청 시 생성)을 다른 시스템에도 그대로 적용할 수 있다. 이 클러스터와 바로 연결지어볼 만한 것들:
+- **SSH 시크릿 엔진**: 3노드(chan08/chan09/llm001)에 정적 `authorized_keys` 대신 접속 시점마다 짧은 수명의 SSH 인증서를 발급 — [`07-1-ceph-storage.md`](07-1-ceph-storage.md)에서 cephadm의 SSH 계정을 root에서 chan으로 전환했던 것의 다음 단계로 볼 수 있다.
+- **Kubernetes 인증 방식**: 파드가 자기 자신의 ServiceAccount 토큰으로 Vault에 직접 로그인 — 앱마다 정적 Vault 토큰을 설정 파일에 박아 넣을 필요가 없어진다.
+- 반대로 **Ceph RGW(S3)는 안 된다** — Vault 공식 secrets engine 목록에 RGW 전용 플러그인이 없다(AWS IAM 엔진은 있지만 RGW는 그 API를 흉내만 낼 뿐이라 안 맞는다). 붙이려면 커스텀 플러그인이 필요한 수준이라 기본 제공 범위 밖이다.
 
 ## 알려진 이슈
 
@@ -133,6 +167,7 @@ kubectl -n vault exec vault-0 -- env VAULT_TOKEN=<root token> vault read databas
 2. KV v2 활성화 후 `secret/demo/app`에 쓰고 그대로 읽히는 것 확인
 3. **unseal 재현**: vault-2 파드를 강제 삭제 → 재기동된 파드가 다시 `Sealed: true`로 뜨는 것 확인 → 3개 키로 다시 unseal해서 정상화
 4. **동적 시크릿 end-to-end**: `database/creds/readonly`로 발급받은 자격증명으로 실제 MySQL 접속 성공(`vault_demo.items` SELECT), 권한 밖 스키마(`mysql`, `information_schema`) 접근은 거부됨 확인. `vault lease revoke`로 강제 회수 후 같은 자격증명으로 재접속 시도 시 `Access denied` 확인(Vault가 실제로 MySQL `DROP USER`까지 수행함을 증명)
+5. **PKI end-to-end**: root CA 생성(10년) → `test-role`로 리프 인증서 발급 → `openssl verify`로 체인 유효성 확인 → 그 인증서로 실제 TLS 서버(`openssl s_server`)를 띄우고 CA를 신뢰한 클라이언트로 접속 성공(HTTP 200), CA 없이는 접속 실패 확인 → `vault write pki/revoke`로 폐기 후 `state: revoked` 확인
 
 ---
 
