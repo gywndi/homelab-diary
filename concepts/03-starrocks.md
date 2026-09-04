@@ -173,4 +173,4 @@ k8s 배포에서 headless Service로 고정 hostname을 만들어준 것과 같�
 
 ---
 
-[← 이전: Ceph 개념](02-ceph.md)
+[← 이전: Ceph 개념](02-ceph.md) · [다음: Vault 개념 →](04-vault.md)

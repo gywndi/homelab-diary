@@ -1,6 +1,6 @@
 # NAS 연동 (RWX 스토리지 + 백업 타깃)
 
-[← 이전: 내부 도메인 DNS](09-internal-dns.md)
+[← 이전: 내부 도메인 DNS](09-internal-dns.md) · [다음: Vault →](11-vault.md)
 
 기존 NAS(`nas.home`, Synology)를 두 가지 용도로 클러스터에 붙였다. **① k8s의 ReadWriteMany(RWX) 스토리지**(여러 파드가 동시에 같은 파일을 쓰는 워크로드용) — [Ceph 스토리지](07-1-ceph-storage.md)의 설계 결정에서 "RWX가 필요해지면 NAS(NFS)로 커버한다"고 미뤄뒀던 것. **② etcd/MySQL 백업의 오프노드 사본** — 지금까지 백업이 만들어지는 그 노드(chan08)의 로컬 디스크에만 있었다는 단일 장애점을 없앤다.
 
@@ -145,4 +145,4 @@ ssh 10.5.5.8 "ls -la /mnt/nas-backup/k8s/backups/etcd-backup /mnt/nas-backup/k8s
 
 ---
 
-[← 이전: 내부 도메인 DNS](09-internal-dns.md)
+[← 이전: 내부 도메인 DNS](09-internal-dns.md) · [다음: Vault →](11-vault.md)
