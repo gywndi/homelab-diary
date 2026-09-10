@@ -40,6 +40,9 @@
 11. Vault (시크릿 관리)
     - Raft Integrated Storage로 3노드 쿼럼, MySQL 동적 시크릿(요청 시점 자격증명 발급/회수)까지 검증
     - 문서 [바로가기](lessons/11-vault.md) · 스크립트 [바로가기](scripts/11-vault/)
+12. LLM 서빙 (Ollama + RAG)
+    - llm001 GPU로 Qwen2.5:7B 서빙, 저장한 문서 기반으로 답하는 RAG까지 구성(현재 클러스터 내부용)
+    - 문서 [바로가기](lessons/12-llm-serving.md) · 스크립트 [바로가기](scripts/12-llm-serving/)
 
 ## 운영 명령 모음
 

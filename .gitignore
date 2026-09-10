@@ -6,3 +6,4 @@ internal/
 
 # 운영 지침 (Claude 작업용, 공개 레슨 콘텐츠 아님)
 AGENTS.md
+__pycache__/

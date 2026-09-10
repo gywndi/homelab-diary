@@ -1,6 +1,6 @@
 # Vault (시크릿 관리)
 
-[← 이전: NAS 연동](10-nas-storage.md)
+[← 이전: NAS 연동](10-nas-storage.md) · [다음: LLM 서빙(Ollama+RAG) →](12-llm-serving.md)
 
 AWS Secrets Manager 같은 시크릿 관리 시스템을 자체 호스팅해본다. k8s StatefulSet으로 3개 파드, Raft Integrated Storage로 쿼럼을 구성했다. 개념(Raft 쿼럼, unseal, 동적 시크릿)은 [concepts/04-vault.md](../concepts/04-vault.md) 참고.
 
@@ -225,4 +225,4 @@ kubectl -n vault exec vault-0 -- env VAULT_TOKEN=<root token> vault read databas
 
 ---
 
-[← 이전: NAS 연동](10-nas-storage.md)
+[← 이전: NAS 연동](10-nas-storage.md) · [다음: LLM 서빙(Ollama+RAG) →](12-llm-serving.md)
