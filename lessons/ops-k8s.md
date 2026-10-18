@@ -65,6 +65,40 @@ kubectl -n <ns> create configmap <name> --from-file=<key>=/tmp/<key> \
 ```
 마지막 패턴(`get -o jsonpath` → 파일 수정 → `create --dry-run=client -o yaml | apply`)은 `kubectl edit`이나 JSON 파이프보다 안전하다 — 실제로 바뀌는 내용을 파일로 직접 눈으로 확인할 수 있고, 다른 키를 실수로 건드릴 위험이 없다.
 
+## 스토리지 (StorageClass/PVC/PV)
+
+StorageClass는 "어떤 백엔드에서 어떤 방식으로 볼륨을 만들지"를 적어둔 템플릿이다. 이 클러스터에는 `ceph-csi-rbd`(Ceph 블록, RWO)와 `nfs-nas`(NAS NFS, RWX) 두 개가 있고, 정의는 각각 [`20-deploy-ceph-csi.sh`](../scripts/07-ceph-storage/20-deploy-ceph-csi.sh)와 [`02-deploy-nfs-csi.sh`](../scripts/10-nas-storage/02-deploy-nfs-csi.sh) 안의 `kubectl apply` heredoc이다.
+
+```bash
+# 등록된 StorageClass 목록 (provisioner, reclaimPolicy, 확장 가능 여부 한눈에)
+kubectl get storageclass
+
+# 클러스터에 실제 적용된 정의 전체 (스크립트 내용과 대조할 때)
+kubectl get sc ceph-csi-rbd -o yaml
+
+kubectl get sc nfs-nas -o yaml
+
+# ceph-csi-rbd가 바라보는 Ceph 클러스터 ID (스크립트에서는 FSID 값으로 치환되어 들어감)
+kubectl get sc ceph-csi-rbd -o jsonpath='{.parameters.clusterID}'
+
+# 전체 PVC가 어떤 StorageClass를 쓰는지
+kubectl get pvc -A -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name,SC:.spec.storageClassName,STATUS:.status.phase,SIZE:.status.capacity.storage
+
+# PV 목록 (RECLAIM POLICY, 어느 PVC에 묶였는지)
+kubectl get pv
+
+# 특정 PVC가 Pending일 때 원인 (Events 섹션)
+kubectl -n <ns> describe pvc <name>
+
+# CSI 드라이버 파드 상태 (ceph-csi)
+kubectl -n ceph-csi get pods
+
+# CSI 드라이버 등록 목록 (rbd.csi.ceph.com, nfs.csi.k8s.io가 보여야 함)
+kubectl get csidrivers
+```
+
+`reclaimPolicy`가 다르므로 PVC를 지울 때 동작이 다르다. `ceph-csi-rbd`는 `Delete`라 PVC를 지우면 Ceph의 RBD 이미지까지 삭제된다. `nfs-nas`는 `Retain`이라 PV와 NAS 디렉토리가 남고, 정리하려면 PV와 디렉토리를 직접 지워야 한다.
+
 ## 노드 정비 (cordon/drain)
 
 ```bash
