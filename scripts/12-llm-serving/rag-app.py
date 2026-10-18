@@ -8,7 +8,7 @@ OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://ollama.llm.svc.cluster.local:1
 GEN_MODEL = os.environ.get("GEN_MODEL", "qwen2.5:7b")
 EMBED_MODEL = os.environ.get("EMBED_MODEL", "nomic-embed-text")
 CHUNK_SIZE = 500
-CHUNK_OVERLAP = 50
+CHUNK_OVERLAP = 150
 
 app = FastAPI()
 client = chromadb.PersistentClient(path="/data/chroma")
