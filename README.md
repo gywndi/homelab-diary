@@ -44,7 +44,7 @@
     - llm001 GPU로 Qwen2.5:7B 서빙, 저장한 문서 기반으로 답하는 RAG까지 구성(현재 클러스터 내부용)
     - 문서 [바로가기](lessons/12-llm-serving.md) · 스크립트 [바로가기](scripts/12-llm-serving/)
 13. GitLab (소스 저장소 + CI/CD 기반)
-    - k8s 위 Omnibus 단일 파드 + Ceph RBD, 공인 도메인 HTTPS, NAS 백업, 노드 장애 시 볼륨 자동 해제(펜싱 포함)까지 구성
+    - k8s 위 Omnibus 단일 파드 + Ceph RBD, 공인 도메인 HTTPS, NAS 백업, 노드 장애 시 볼륨 자동 해제(펜싱 포함), CI Runner(Kubernetes executor)까지 구성
     - 문서 [바로가기](lessons/13-gitlab.md) · 스크립트 [바로가기](scripts/13-gitlab/)
 
 ## 운영 명령 모음

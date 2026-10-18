@@ -2,7 +2,7 @@
 
 [← 이전: LLM 서빙](12-llm-serving.md)
 
-k8s 위에 자체 호스팅 GitLab을 세운다. 소스 코드를 저장하고, 코드가 바뀔 때마다 테스트와 배포를 자동으로 돌리는 CI/CD(Continuous Integration/Continuous Delivery, 변경을 계속 합치고 계속 배포하는 자동화 흐름)의 기반이다. 이 문서는 GitLab 본체와 그 주변(접속·인증서·백업·장애 전환)까지만 다룬다. 이 위에서 파이프라인을 돌리는 Runner(CI 작업을 실제로 실행하는 에이전트)와 Snowflake dbt 연동은 아직 구성하지 않았다.
+k8s 위에 자체 호스팅 GitLab을 세운다. 소스 코드를 저장하고, 코드가 바뀔 때마다 테스트와 배포를 자동으로 돌리는 CI/CD(Continuous Integration/Continuous Delivery, 변경을 계속 합치고 계속 배포하는 자동화 흐름)의 기반이다. 이 문서는 GitLab 본체와 그 주변(접속·인증서·백업·장애 전환)에 더해, 파이프라인을 실제로 돌리는 Runner(CI 작업을 실행하는 에이전트)까지 다룬다. Snowflake dbt 파이프라인은 별도 저장소 `snowflake-dbt`에서 이 Runner 위에 구성했다.
 
 ## 목적
 
@@ -23,6 +23,7 @@ GitLab 기반 CI/CD로 다양한 배포 환경을 시험하는 것이 최종 목
 | 데이터 | PVC `gitlab-data` 100Gi (`ceph-csi-rbd`) | Ceph RBD 블록 볼륨, 노드와 무관하게 보존 |
 | 백업 보관 | PVC `gitlab-backup` 50Gi (`nfs-nas`) | NAS에 보관 |
 | 장애 전환 | `node-failover` 네임스페이스의 DaemonSet | 노드가 죽으면 볼륨을 안전하게 풀어주는 컨트롤러 |
+| CI Runner | `gitlab/gitlab-runner:alpine-v19.4.1`, `gitlab-runner` 네임스페이스 | CI 작업마다 파드를 하나씩 띄워 실행하는 Kubernetes executor |
 
 ## 설계 결정
 
@@ -291,6 +292,37 @@ kubectl apply -f - <<'EOF'
 EOF
 ```
 
+### GitLab Runner (CI 작업 실행기)
+- 설명: CI 작업을 실제로 실행하는 Runner를 k8s에 설치한다. Runner 본체는 Deployment 1개이고, 작업이 들어오면 같은 네임스페이스에 파드를 하나 띄워 실행한 뒤 지운다(Kubernetes executor). 그래서 작업 환경이 매번 깨끗하고, 노드 자원은 작업 시간 동안만 쓴다. 인증 토큰은 GitLab에서 인스턴스 Runner를 만들어 받고 Secret에만 저장한다. 이미 Secret이 있으면 Runner를 새로 만들지 않는다.
+- 스크립트: [`08-gitlab-runner.sh`](../scripts/13-gitlab/08-gitlab-runner.sh)
+
+```bash
+# Runner 전용 네임스페이스를 만든다
+kubectl create namespace gitlab-runner --dry-run=client -o yaml | kubectl apply -f -
+
+# GitLab 안에서 인스턴스 Runner를 만들고 인증 토큰을 받는다 (태그 k8s, 태그 없는 작업도 받는다)
+kubectl -n gitlab exec deploy/gitlab -- gitlab-rails runner '...'
+
+# 받은 토큰을 Secret에 저장한다
+kubectl -n gitlab-runner create secret generic runner-token --from-literal=token=<인증 토큰>
+
+# ServiceAccount, 최소 권한 Role, RoleBinding, ConfigMap, Deployment를 한 번에 적용한다
+kubectl apply -f - <<'EOF'
+...
+EOF
+
+# Runner 파드가 뜰 때까지 기다린다
+kubectl -n gitlab-runner rollout status deploy/gitlab-runner --timeout=300s
+```
+
+`<인증 토큰>`은 Runner를 만들 때마다 새로 발급되어 고정할 수 없다.
+
+- **권한은 이 네임스페이스 안으로 한정한다.** Role은 파드·시크릿·컨피그맵·서비스 조작과 `pods/exec`, `pods/log`만 허용한다.
+- **토큰을 ConfigMap에 두지 않는다.** `config.toml`은 토큰 자리(`__TOKEN__`)만 비워 ConfigMap에 두고, 컨테이너가 시작될 때 Secret 값으로 치환해 `emptyDir`에 쓴다.
+- **동시 작업은 4개다.** 요청도 병렬 4개로 보낸다. 1이면 긴 폴링 때문에 작업 시작이 늦어질 수 있다.
+- **작업 파드의 기본 이미지는 `alpine:3.20`이다.** 파이프라인에서 `image`를 지정하면 그 이미지로 바뀐다.
+- **작업 파드의 자원 상한은 CPU 2코어, 메모리 2Gi다.**
+
 ## 알려진 이슈
 
 ### kubelet 헬스체크가 404를 받는다
@@ -364,6 +396,7 @@ kubectl -n node-failover logs ds/node-failover --tail=20
 - 2026-10-18: 공인 도메인으로 전환해 Let's Encrypt 인증서 발급, HTTPS 200, 검증 통과를 확인했다. 회원가입을 비활성화했다.
 - 2026-10-18: 공인 도메인 접속이 간헐적으로 끊기는 문제를 조사했다. 공유기 DNS의 간헐적 NXDOMAIN이 원인임을 확인하고 내부 DNS에 직접 등록했다. 등록 후 A 25/25 정상, 시스템 리졸버 경유 접속 40/40 성공을 확인했다.
 - 2026-10-18: 장애 전환 컨트롤러를 3노드에 배포했다. 정상 노드(chan09)를 장애 노드로 가정하는 시험 모드(DRY_RUN)에서 RBD 3개 인식, 살아있는 watcher 인식, 실행될 명령 출력을 확인했고 실제 상태는 바뀌지 않았다. 노드를 실제로 내린 장애 테스트는 하지 않았다.
+- 2026-10-18: Runner를 설치하고 별도 저장소의 dbt 파이프라인을 돌렸다. 작업마다 `gitlab-runner` 네임스페이스에 파드가 생겼다가 사라지는 것과 파이프라인 두 단계(`validate`, `deploy`)가 성공하는 것을 확인했다. 작업 이미지에 `git`이 없어 `dbt debug`의 의존성 점검이 실패한 적이 있다. 연결 점검만 하도록 옵션을 바꿔 해결했다.
 
 ---
 

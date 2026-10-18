@@ -198,6 +198,38 @@ kubectl -n kube-system get pods -l name=nvidia-device-plugin-ds -o wide
 ssh llm001.home nvidia-smi
 ```
 
+## CI Runner (GitLab)
+
+[`13-gitlab.md`](13-gitlab.md)의 Runner는 `gitlab-runner` 네임스페이스에 Deployment 1개로 떠 있고, CI 작업이 들어오면 그 네임스페이스에 작업 파드를 하나씩 만들었다가 지운다.
+
+```bash
+# Runner 본체 파드 상태 (작업이 도는 동안에는 runner-... 이름의 작업 파드가 같이 보임)
+kubectl -n gitlab-runner get pods -o wide
+
+# Runner 로그 (작업을 받았는지, 파드 생성에 실패했는지)
+kubectl -n gitlab-runner logs deploy/gitlab-runner --tail=30
+
+# 작업 파드가 뜨고 지워지는 모습을 실시간으로 보기
+kubectl -n gitlab-runner get pods -w
+
+# 인증 토큰 Secret이 있는지 (값은 출력하지 않는다)
+kubectl -n gitlab-runner get secret runner-token
+
+# 프로젝트의 최근 파이프라인 상태와 작업별 결과 (GitLab 파드 안에서 조회, 읽기 전용)
+kubectl -n gitlab exec deploy/gitlab -- gitlab-rails runner 'p = Project.find_by_full_path("<네임스페이스>/<프로젝트>"); pl = p.all_pipelines.order(id: :desc).first; puts "pipeline ##{pl.id} #{pl.status}"; pl.builds.each { |b| puts "#{b.name} #{b.status} #{b.failure_reason}" }'
+
+# 작업 로그 마지막 25줄 (실패 원인 확인)
+kubectl -n gitlab exec deploy/gitlab -- gitlab-rails runner 'p = Project.find_by_full_path("<네임스페이스>/<프로젝트>"); b = p.all_pipelines.order(id: :desc).first.builds.find_by(name: "<작업 이름>"); puts b.trace.raw.to_s.lines.last(25).join'
+```
+
+`<네임스페이스>/<프로젝트>`는 GitLab 프로젝트 경로, `<작업 이름>`은 `.gitlab-ci.yml`의 작업 이름이다. 파이프라인 화면에서도 같은 내용을 볼 수 있다.
+
+CI가 안 돌 때 보는 순서는 이렇다.
+
+- **작업이 `Pending`에서 안 움직임**: Runner 파드가 `Running`인지, 로그에 파드 생성 오류가 없는지 본다. 작업 파드가 Pending이면 `kubectl -n gitlab-runner describe pod <작업 파드>`의 Events에서 자원 부족을 확인한다.
+- **작업 안에서 외부 접속 실패**: 작업 파드는 일반 파드와 같은 네트워크를 쓴다. 패키지 저장소나 외부 서비스에 못 나가면 UFW와 내부 DNS를 먼저 의심한다.
+- **작업 이미지에 도구가 없음**: 기본 이미지는 최소 이미지라 `git` 같은 도구가 없을 수 있다. 파이프라인에서 `image`를 지정하거나 해당 도구를 쓰지 않는 옵션으로 바꾼다.
+
 ## 방화벽(UFW)이 원인일 때
 
 k8s 트래픽이 막히는 문제의 상당수는 UFW 쪽이다([`02-k8s-cluster.md`](02-k8s-cluster.md#알려진-이슈-ufw가-pod-네트워크를-막음), [`04-1-ingress.md`](04-1-ingress.md#알려진-이슈) 참고).
