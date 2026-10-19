@@ -46,6 +46,9 @@
 13. GitLab (소스 저장소 + CI/CD 기반)
     - k8s 위 Omnibus 단일 파드 + Ceph RBD, 공인 도메인 HTTPS, NAS 백업, 노드 장애 시 볼륨 자동 해제(펜싱 포함), CI Runner(Kubernetes executor)까지 구성
     - 문서 [바로가기](lessons/13-gitlab.md) · 스크립트 [바로가기](scripts/13-gitlab/)
+14. Airflow (워크플로 스케줄러 + DAG 저장소)
+    - k8s 위 단일 파드(standalone, LocalExecutor) + 기존 MySQL 메타데이터 DB, 공인 도메인 HTTPS, GitLab `develop` → `main` 브랜치 규칙과 `GitDagBundle`로 DAG 자동 동기화
+    - 문서 [바로가기](lessons/14-airflow.md) · 스크립트 [바로가기](scripts/14-airflow/)
 
 ## 운영 명령 모음
 
