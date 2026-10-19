@@ -18,9 +18,12 @@ kubectl -n internal-dns get cm internal-dns-corefile -o json | DOMAIN="$DOMAIN" 
 import os, sys, json
 d = json.load(sys.stdin)
 c = d['data']['Corefile']
+# 다른 템플릿 블록에도 같은 들여쓰기의 fallthrough가 있다. hosts 블록의 것만 골라 그 앞에 넣는다
+start = c.index('hosts /etc/coredns/customhosts {')
 for line in ('      10.5.5.55 gitlab-ssh.k8s.home\\n', '      10.5.5.50 ' + os.environ['DOMAIN'] + '\\n'):
     if line not in c:
-        c = c.replace('      fallthrough\\n', line + '      fallthrough\\n', 1)
+        end = c.index('      fallthrough\\n', start)
+        c = c[:end] + line + c[end:]
 print(json.dumps({'data': {'Corefile': c}}))" > /tmp/corefile-patch.json
 
 kubectl -n internal-dns patch cm internal-dns-corefile --type merge --patch-file /tmp/corefile-patch.json

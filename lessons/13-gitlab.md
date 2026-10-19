@@ -323,6 +323,29 @@ kubectl -n gitlab-runner rollout status deploy/gitlab-runner --timeout=300s
 - **작업 파드의 기본 이미지는 `alpine:3.20`이다.** 파이프라인에서 `image`를 지정하면 그 이미지로 바뀐다.
 - **작업 파드의 자원 상한은 CPU 2코어, 메모리 2Gi다.**
 
+### 공인 도메인 변경
+- 설명: GitLab의 공인 도메인을 새 이름으로 바꾼다. 내부 DNS 등록, ingress와 인증서에 새 호스트 추가, `external_url` 변경(재기동), Runner 접속 주소 변경을 순서대로 한다. 인증서에 새 이름이 들어온 것을 확인한 뒤에 GitLab을 재기동한다. 재기동 중에는 몇 분 동안 웹이 응답하지 않는다. 공인 DNS의 A 레코드는 미리 집 공인 IP를 가리켜야 한다. 인증서 발급(HTTP-01)이 이 경로를 쓰기 때문이다.
+- 스크립트: [`09-change-domain.sh`](../scripts/13-gitlab/09-change-domain.sh)
+
+```bash
+# 내부 DNS에 새 이름을 직접 등록한다 (공유기 DNS를 거치지 않게 한다)
+./03-add-ssh-dns.sh git.example.com
+
+# ingress에 새 호스트와 TLS 호스트를 추가한다 (기존 도메인은 전환이 끝날 때까지 남겨 둔다)
+kubectl -n gitlab patch ingress gitlab --type merge --patch-file <패치 파일>
+
+# GitLab 설정(GITLAB_OMNIBUS_CONFIG)의 external_url을 새 이름으로 바꾸고 재기동한다
+kubectl replace -f -
+
+# 재기동이 끝날 때까지 기다린다
+kubectl -n gitlab rollout status deploy/gitlab --timeout=900s
+
+# Runner의 접속 주소를 새 이름으로 바꾸고 재기동한다
+kubectl -n gitlab-runner rollout restart deploy/gitlab-runner
+```
+
+`<패치 파일>`은 ingress의 현재 규칙에 새 호스트를 더해 스크립트가 만드는 임시 파일이라 고정할 수 없다. 전환이 끝나면 기존 도메인은 ingress에서 빼고, 공인 DNS의 기존 레코드는 직접 지운다.
+
 ## 알려진 이슈
 
 ### kubelet 헬스체크가 404를 받는다
@@ -351,6 +374,9 @@ ingress가 만드는 인증서 요청(CSR)에는 CN이 없고 SAN(대체 이름)
 
 ### DDNS 갱신 목록에 없는 이름은 공인 IP가 바뀌면 따라가지 못한다
 `gitlab.example.com`은 고정 A 레코드다. 집 공인 IP를 주기적으로 갱신하는 DDNS 호스트 목록에 넣지 않으면, 공인 IP가 바뀔 때 이 이름만 옛 IP를 가리킨다. 목록에 추가하거나 DDNS가 관리하는 이름으로의 CNAME으로 바꿔야 한다.
+
+### 내부 DNS 설정 수정이 엉뚱한 블록에 줄을 넣어 DNS가 멈춘다
+`internal-dns`의 Corefile에는 `fallthrough`가 같은 들여쓰기로 여러 블록에 있다. 첫 번째 것을 기준으로 줄을 넣으면 `hosts` 블록이 아닌 `template` 블록에 들어가 CoreDNS가 파싱 오류로 뜨지 못한다. 그러면 `internal-dns`를 쓰는 LAN 전체의 이름 해석이 멈춘다. `03-add-ssh-dns.sh`가 `hosts` 블록의 `fallthrough` 앞에만 넣도록 고쳤다.
 
 ### 출발지 IP로 접속을 제한할 수 없다
 ingress-nginx 서비스가 `externalTrafficPolicy: Cluster`라서 요청의 출발지가 노드 대역으로 바뀐다. 허용 IP 목록을 걸 수 없다. `Local`로 바꾸면 되지만 다른 사이트에도 영향이 있어 하지 않았다.
@@ -397,6 +423,7 @@ kubectl -n node-failover logs ds/node-failover --tail=20
 - 2026-10-18: 공인 도메인 접속이 간헐적으로 끊기는 문제를 조사했다. 공유기 DNS의 간헐적 NXDOMAIN이 원인임을 확인하고 내부 DNS에 직접 등록했다. 등록 후 A 25/25 정상, 시스템 리졸버 경유 접속 40/40 성공을 확인했다.
 - 2026-10-18: 장애 전환 컨트롤러를 3노드에 배포했다. 정상 노드(chan09)를 장애 노드로 가정하는 시험 모드(DRY_RUN)에서 RBD 3개 인식, 살아있는 watcher 인식, 실행될 명령 출력을 확인했고 실제 상태는 바뀌지 않았다. 노드를 실제로 내린 장애 테스트는 하지 않았다.
 - 2026-10-18: Runner를 설치하고 별도 저장소의 dbt 파이프라인을 돌렸다. 작업마다 `gitlab-runner` 네임스페이스에 파드가 생겼다가 사라지는 것과 파이프라인 두 단계(`validate`, `deploy`)가 성공하는 것을 확인했다. 작업 이미지에 `git`이 없어 `dbt debug`의 의존성 점검이 실패한 적이 있다. 연결 점검만 하도록 옵션을 바꿔 해결했다.
+- 2026-10-18: 공인 도메인을 새 이름으로 바꿨다. 새 이름으로 HTTPS 200, 인증서 검증 통과, GitLab이 인식하는 주소 변경, Runner 연결 유지, SSH 원격 정상을 확인했다. 전환 중 내부 DNS 파드가 몇 분 `CrashLoopBackOff`였던 문제를 발견해 Corefile을 복구하고 스크립트를 고쳤다. 기존 도메인은 ingress에서 제거했다.
 
 ---
 
