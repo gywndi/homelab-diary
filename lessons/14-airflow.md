@@ -137,6 +137,7 @@ Deployment의 핵심 설정은 다음과 같다.
 - 실행 명령: `airflow standalone`
 - 실행기: `AIRFLOW__CORE__EXECUTOR=LocalExecutor`, 병렬 작업 8개
 - 예제 DAG 끔: `AIRFLOW__CORE__LOAD_EXAMPLES=False`
+- 커넥션 화면의 Test 버튼 켬: `AIRFLOW__CORE__TEST_CONNECTION=Enabled` (기본값은 꺼짐이다. 시크릿이 아니라 설정값이라 환경 변수로 넣는다)
 - 시간대: `Asia/Seoul`
 - 자원: 요청 CPU 300m / 메모리 1Gi, 상한 메모리 2Gi
 - 준비 확인: `/api/v2/monitor/health`, 시작 60초 뒤부터 15초마다

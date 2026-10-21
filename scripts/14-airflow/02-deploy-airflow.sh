@@ -64,6 +64,8 @@ spec:
               value: LocalExecutor
             - name: AIRFLOW__CORE__LOAD_EXAMPLES
               value: "False"
+            - name: AIRFLOW__CORE__TEST_CONNECTION
+              value: Enabled
             - name: AIRFLOW__CORE__PARALLELISM
               value: "8"
             - name: AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS
