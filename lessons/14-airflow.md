@@ -202,7 +202,7 @@ kubectl -n gitlab exec deploy/gitlab -- gitlab-rails runner '...'
 
 Airflow 작업이 Snowflake에 접속하도록 서비스 사용자와 커넥션을 만든다. 순서는 키 쌍 생성, Snowflake에 사용자와 공개키 등록, Airflow 커넥션 생성, DAG로 확인이다. 이 절차는 스크립트가 아니라 명령으로 수행했다. 개인키가 거치는 곳은 로컬 PC와 Airflow 커넥션뿐이다.
 
-### 키 쌍 생성 (로컬 PC)
+### 1단계: 키 쌍 생성 (로컬 PC)
 
 ```bash
 # 키를 둘 폴더를 만들고 본인만 접근하게 한다 (저장소 밖)
@@ -216,14 +216,33 @@ chmod 600 svc_key.p8
 
 # 개인키에서 공개키를 뽑는다
 openssl rsa -in svc_key.p8 -pubout -out svc_key.pub
-
-# Snowflake에 넣을 공개키 본문 한 줄을 만든다 (헤더·푸터·줄바꿈 제거)
-grep -v "PUBLIC KEY" svc_key.pub | tr -d '\n'
 ```
 
 개인키 파일은 저장소에 넣지 않는다. 홈 폴더를 클라우드 동기화(iCloud Drive 등)에 올리는 설정이라면 이 폴더는 제외한다.
 
-### Snowflake 롤과 사용자 생성
+### 2단계: 롤과 사용자 생성 SQL 만들기 (로컬 PC)
+
+공개키가 채워진 SQL을 만들어 클립보드에 넣는다. 아래 블록을 통째로 터미널에 붙여넣는다.
+
+```bash
+# 공개키 본문 한 줄을 만든다 (헤더·푸터·줄바꿈 제거)
+PUB=$(grep -v "PUBLIC KEY" ~/airflow-snowflake/svc_key.pub | tr -d '\n')
+
+# 공개키가 들어간 SQL을 클립보드에 넣는다
+pbcopy <<EOF
+USE ROLE USERADMIN;
+CREATE ROLE IF NOT EXISTS AIRFLOW_APP;
+CREATE USER IF NOT EXISTS SVC_AIRFLOW TYPE = SERVICE DEFAULT_ROLE = AIRFLOW_APP DEFAULT_WAREHOUSE = DBT_WH RSA_PUBLIC_KEY = '$PUB' COMMENT = 'Airflow 애플리케이션 계정 (키 인증)';
+GRANT ROLE AIRFLOW_APP TO USER SVC_AIRFLOW;
+USE ROLE SECURITYADMIN;
+GRANT USAGE ON WAREHOUSE DBT_WH TO ROLE AIRFLOW_APP;
+DESC USER SVC_AIRFLOW;
+EOF
+```
+
+### 3단계: Snowflake에서 실행
+
+Snowsight 워크시트에 클립보드를 붙여넣고 전체를 실행한다. 마지막 `DESC USER` 결과의 `RSA_PUBLIC_KEY_FP`에 값이 있으면 키가 등록된 것이다. 클립보드에 들어가는 SQL은 아래와 같다.
 
 ```sql
 -- 롤과 사용자는 USERADMIN으로 만든다
@@ -253,9 +272,9 @@ DESC USER SVC_AIRFLOW;
 
 `<공개키 한 줄>`은 위에서 만든 공개키 본문이라 사용자마다 달라 고정할 수 없다. 사용자가 이미 있으면 `CREATE USER IF NOT EXISTS`가 건너뛰므로 `ALTER USER SVC_AIRFLOW SET RSA_PUBLIC_KEY = '<공개키 한 줄>'`로 키만 등록한다. `GRANT USAGE ON WAREHOUSE`가 권한 부족으로 실패하면 웨어하우스 소유 롤로 바꿔 실행한다. 테이블을 읽거나 쓰려면 대상 데이터베이스·스키마·테이블 권한을 필요한 만큼만 더한다. 키 교체는 `RSA_PUBLIC_KEY_2` 슬롯에 새 키를 먼저 등록하고, 클라이언트를 바꾼 뒤 기존 슬롯을 비우면 끊김 없이 된다.
 
-### Airflow 커넥션 만들기 (UI)
+### 4단계: Airflow 커넥션 만들기 (UI)
 
-개인키를 PEM 파일 전체 기준 base64 한 줄로 바꾸고, UI의 Private key (Text) 칸에 붙여넣는다.
+개인키를 PEM 파일 전체 기준 base64 한 줄로 바꿔 클립보드에 넣고, UI의 Private key (Text) 칸에 붙여넣는다.
 
 ```bash
 # 개인키 파일 전체(헤더 포함)를 base64 한 줄로 만들어 클립보드에 넣는다
@@ -294,7 +313,7 @@ Airflow UI의 Admin → Connections → Add Connection에서 다음과 같이 �
 
 따라서 base64로 넣을 때는 PEM 파일 전체를 인코딩해야 한다. 헤더와 푸터를 뺀 본문만 인코딩하거나 본문만 그대로 넣으면 디코딩 결과가 PEM이 아니어서 읽기에 실패한다.
 
-### 확인용 DAG
+### 5단계: DAG로 확인
 
 커넥션은 DAG 작업으로 확인한다. `dags/examples/snowflake_check.py`는 `snowflake_app`으로 현재 사용자·롤·웨어하우스를 조회한다.
 
