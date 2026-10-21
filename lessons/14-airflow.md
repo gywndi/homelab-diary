@@ -431,6 +431,9 @@ docker compose up
 
 ## 알려진 이슈
 
+### 커넥션 Test 버튼이 400(The host or port to test differs ...)으로 실패한다
+Snowflake 폼은 Host/Port 칸을 숨기고 Port를 `0`으로 채워 보낸다. 저장된 Port가 비어 있으면 값이 다르다고 판단해 저장된 키를 쓰지 못하게 막는다. 저장된 Port를 `0`으로 맞추면 통과한다. 커넥션을 UI에서 한 번 저장하면 Port가 `0`으로 저장되므로 이 상태가 된다.
+
 ### 설정 맵을 DAG 폴더에 그대로 마운트하면 DAG 탐색이 무한 루프로 오인한다
 초기에 DAG를 ConfigMap으로 넣었을 때, ConfigMap 마운트의 심볼릭 링크(`..data`) 구조를 dag-processor가 재귀 루프로 판단해 실패했다. emptyDir에 복사해서 해결했고, 이후 `GitDagBundle` 방식으로 바꾸면서 ConfigMap 자체를 쓰지 않는다.
 
