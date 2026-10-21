@@ -304,6 +304,102 @@ Airflow UI의 Admin → Connections → Add Connection에서 다음과 같이 �
 
 `<조직>-<계정>`은 환경마다 다른 Snowflake 계정 식별자이고, `<base64 한 줄>`은 키마다 달라서 고정할 수 없다.
 
+### 4단계 대안: Airflow CLI로 커넥션 만들기
+UI로 만들면 Port가 NULL로 저장되어 Test 버튼이 400이 난다. CLI로 만들면 `--conn-port 0`이 그대로 저장되어 Test가 통과한다. CLI는 파드 안에서 실행하고, 메타데이터 DB에 직접 쓴다. 아래 방법은 모두 임시 키로 만들어 보고 값이 저장되는 것까지 확인했다.
+
+먼저 같은 이름의 커넥션이 있으면 지운다.
+
+```bash
+# 기존 커넥션을 지운다 (없으면 오류가 나지만 무시해도 된다)
+kubectl -n airflow exec deploy/airflow -c airflow -- airflow connections delete snowflake_app
+```
+
+#### 방법 1: 개인키 base64를 Extra에 넣기 (권장)
+키가 DB에 암호화되어 저장되므로 파드가 다시 떠도 유지된다.
+
+```bash
+# 개인키 PEM 파일 전체를 줄바꿈 없는 base64 한 줄로 만든다 (키 내용은 실행할 때마다 달라 변수에 담는다)
+B64=$(base64 < ~/airflow-snowflake/svc_key.p8 | tr -d '\n')
+
+# 커넥션을 만든다 (Port는 0으로 넣어야 UI Test가 통과한다)
+kubectl -n airflow exec deploy/airflow -c airflow -- airflow connections add snowflake_app \
+  --conn-type snowflake \
+  --conn-login SVC_AIRFLOW \
+  --conn-schema DBT_DEV \
+  --conn-port 0 \
+  --conn-extra "{\"account\": \"<조직>-<계정>\", \"warehouse\": \"DBT_WH\", \"role\": \"AIRFLOW_APP\", \"private_key_content\": \"$B64\"}"
+```
+
+개인키에 암호(passphrase)를 걸었다면 `--conn-password '<암호>'`를 더한다.
+
+#### 방법 2: 개인키 PEM 텍스트를 Extra에 넣기
+PEM의 줄바꿈이 JSON 안에서 `\n`으로 이스케이프되어야 해서, 파이썬으로 JSON 문자열을 만든다.
+
+```bash
+# PEM 파일 내용을 JSON 문자열로 바꾼다 (줄바꿈이 \n으로 이스케이프된다)
+PEM=$(python3 -c 'import json,os;print(json.dumps(open(os.path.expanduser("~/airflow-snowflake/svc_key.p8")).read()))')
+
+# 커넥션을 만든다
+kubectl -n airflow exec deploy/airflow -c airflow -- airflow connections add snowflake_app \
+  --conn-type snowflake \
+  --conn-login SVC_AIRFLOW \
+  --conn-schema DBT_DEV \
+  --conn-port 0 \
+  --conn-extra "{\"account\": \"<조직>-<계정>\", \"warehouse\": \"DBT_WH\", \"role\": \"AIRFLOW_APP\", \"private_key_content\": $PEM}"
+```
+
+#### 방법 3: 개인키 파일 경로 지정
+키 파일이 파드 안에 있어야 한다. 파드의 `/opt/airflow` 아래 경로는 파드가 다시 뜨면 사라지므로, 운영에는 Secret을 마운트하는 구성이 따로 필요하다. 아래는 동작 확인용이다.
+
+```bash
+# 개인키 파일을 파드로 복사한다 (파드가 다시 뜨면 사라진다)
+kubectl -n airflow cp ~/airflow-snowflake/svc_key.p8 airflow/$(kubectl -n airflow get pod -l app=airflow -o name | cut -d/ -f2):/opt/airflow/svc_key.p8 -c airflow
+
+# 커넥션을 만든다 (private_key_file에 파드 안 경로를 준다)
+kubectl -n airflow exec deploy/airflow -c airflow -- airflow connections add snowflake_app \
+  --conn-type snowflake \
+  --conn-login SVC_AIRFLOW \
+  --conn-schema DBT_DEV \
+  --conn-port 0 \
+  --conn-extra '{"account": "<조직>-<계정>", "warehouse": "DBT_WH", "role": "AIRFLOW_APP", "private_key_file": "/opt/airflow/svc_key.p8"}'
+```
+
+#### 방법 4: JSON 파일로 가져오기
+Port가 확실히 `0`으로 저장되고 `extra`를 JSON 객체로 쓸 수 있다.
+
+```bash
+# 커넥션 정의 JSON을 만든다 (B64는 방법 1에서 만든 값)
+cat > ~/airflow-snowflake/conn.json <<EOF
+{"snowflake_app": {"conn_type": "snowflake", "login": "SVC_AIRFLOW", "schema": "DBT_DEV", "port": 0, "extra": {"account": "<조직>-<계정>", "warehouse": "DBT_WH", "role": "AIRFLOW_APP", "private_key_content": "$B64"}}}
+EOF
+
+# 파일을 파드로 보내 가져온다
+kubectl -n airflow cp ~/airflow-snowflake/conn.json airflow/$(kubectl -n airflow get pod -l app=airflow -o name | cut -d/ -f2):/tmp/conn.json -c airflow
+kubectl -n airflow exec deploy/airflow -c airflow -- airflow connections import /tmp/conn.json
+
+# 파드 안의 JSON 파일을 지운다 (키가 들어 있다)
+kubectl -n airflow exec deploy/airflow -c airflow -- rm /tmp/conn.json
+
+# 로컬의 JSON 파일도 지운다
+rm ~/airflow-snowflake/conn.json
+```
+
+#### 방법 5: `--conn-json`
+한 번에 JSON으로 주는 방식이다. 이 방식은 `port: 0`이 저장되지 않고 NULL이 된다. Test 버튼이 필요하면 쓰지 않는다.
+
+```bash
+# 커넥션 전체를 JSON으로 준다 (B64는 방법 1에서 만든 값)
+kubectl -n airflow exec deploy/airflow -c airflow -- airflow connections add snowflake_app \
+  --conn-json "{\"conn_type\": \"snowflake\", \"login\": \"SVC_AIRFLOW\", \"schema\": \"DBT_DEV\", \"port\": 0, \"extra\": {\"account\": \"<조직>-<계정>\", \"warehouse\": \"DBT_WH\", \"role\": \"AIRFLOW_APP\", \"private_key_content\": \"$B64\"}}"
+```
+
+#### 확인
+
+```bash
+# 저장된 커넥션에서 Port와 키 입력 방식을 확인한다 (키 본문은 출력되지 않게 필드 이름만 본다)
+kubectl -n airflow exec deploy/airflow -c airflow -- airflow connections get snowflake_app -o json | python3 -c 'import sys,json;r=json.load(sys.stdin)[0];e=r["extra_dejson"];print("port =", r["port"]);print([k for k in ("private_key_content","private_key_file") if e.get(k)])'
+```
+
 ### 키 입력 규칙
 
 프로바이더(`apache-airflow-providers-snowflake` 6.17.0)의 키 읽기 순서는 다음과 같다.
