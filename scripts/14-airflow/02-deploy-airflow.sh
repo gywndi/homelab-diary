@@ -69,7 +69,7 @@ spec:
             - name: AIRFLOW__CORE__PARALLELISM
               value: "8"
             - name: AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS
-              value: "admin:admin"
+              value: "admin:admin,viewer:viewer"
             - name: AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE
               value: /opt/airflow/auth/passwords.json
             - name: AIRFLOW__DATABASE__SQL_ALCHEMY_CONN
@@ -102,10 +102,13 @@ spec:
       initContainers:
         - name: init-auth
           image: ${IMAGE}
-          command: ["bash", "-c", "printf '{\"admin\": \"%s\"}' \"\$ADMIN_PASSWORD\" > /opt/airflow/auth/passwords.json"]
+          # viewer-password 가 없으면 viewer 의 비밀번호를 만들지 않아 viewer 로는 로그인할 수 없다(빈 비밀번호 방지)
+          command: ["bash", "-c", "if [ -n \"\$VIEWER_PASSWORD\" ]; then printf '{\"admin\": \"%s\", \"viewer\": \"%s\"}' \"\$ADMIN_PASSWORD\" \"\$VIEWER_PASSWORD\"; else printf '{\"admin\": \"%s\"}' \"\$ADMIN_PASSWORD\"; fi > /opt/airflow/auth/passwords.json"]
           env:
             - name: ADMIN_PASSWORD
               valueFrom: {secretKeyRef: {name: airflow-secrets, key: admin-password}}
+            - name: VIEWER_PASSWORD
+              valueFrom: {secretKeyRef: {name: airflow-secrets, key: viewer-password, optional: true}}
           volumeMounts:
             - {name: auth, mountPath: /opt/airflow/auth}
       volumes:
@@ -141,4 +144,4 @@ YAML
 fi
 
 kubectl -n airflow rollout status deploy/airflow --timeout=600s
-echo "접속: kubectl -n airflow port-forward svc/airflow 8080:8080  → http://localhost:8080 (admin / airflow-secrets의 admin-password)"
+echo "접속: kubectl -n airflow port-forward svc/airflow 8080:8080  → http://localhost:8080 (admin / airflow-secrets의 admin-password, 읽기 전용 viewer / viewer-password)"

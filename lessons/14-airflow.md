@@ -25,7 +25,7 @@ k8s 위에 Apache Airflow 3를 가장 가볍게 세우고, 작업 정의(DAG)를
 | 메타데이터 DB | 기존 MySQL (`mysql.mysql.svc.cluster.local:3306`, DB `airflow`) | DAG 목록, 실행 이력, 커넥션 저장 |
 | 로그 | PVC `airflow-logs` 5Gi (`ceph-csi-rbd`) | 작업 로그 보관, 재시작해도 유지 |
 | 웹 접속 | `https://airflow.example.com` → ingress VIP `10.5.5.50` | Let's Encrypt 인증서, ingress-nginx가 HTTPS 종료 |
-| 로그인 | `SimpleAuthManager`, 계정 `admin` 하나 | 비밀번호는 Secret `airflow-secrets`의 `admin-password` |
+| 로그인 | `SimpleAuthManager`, 계정 `admin`(전체 권한)과 `viewer`(읽기 전용) | 비밀번호는 Secret `airflow-secrets`의 `admin-password`, `viewer-password` |
 | DAG 소스 | GitLab 프로젝트 `airflow-dags`의 `main` 브랜치 | `GitDagBundle`이 60초마다 가져옴 |
 | Git 접속 정보 | Secret `airflow-git` (deploy token) | 읽기 전용 토큰 |
 | Snowflake 커넥션 | Airflow 커넥션 `snowflake_app` (Airflow DB에 암호화 저장) | RSA 키 인증, 서비스 사용자 `SVC_AIRFLOW` |
@@ -39,6 +39,7 @@ k8s 위에 Apache Airflow 3를 가장 가볍게 세우고, 작업 정의(DAG)를
 - **비밀 값은 Secret에만 둔다.** DB 접속 문자열, Fernet 키(Airflow가 커넥션·변수를 암호화하는 키), JWT 서명 키, API 비밀 키, 관리자 비밀번호를 실행할 때마다 새로 생성해 `airflow-secrets`에 넣는다. 이미 Secret이 있으면 다시 만들지 않는다. Fernet 키를 잃으면 저장된 커넥션·변수를 복호화할 수 없어서, 이 Secret은 다시 만들지 않는 것이 중요하다.
 - **Git 접속 정보는 Secret을 따로 둔다 (`airflow-git`).** deploy token은 만료와 교체가 잦지만 Fernet 키 같은 앱 내부 비밀은 거의 바뀌지 않는다. 합쳐 두면 토큰을 교체하다가 Fernet 키를 건드릴 위험이 있다.
 - **인증은 SimpleAuthManager다.** Airflow 3의 기본 인증 방식이다. 계정과 비밀번호가 설정 파일 하나에 고정되며 UI에서 사용자 추가나 비밀번호 변경은 할 수 없다. 혼자 쓰는 환경이라 충분하다고 판단했다. 비밀번호는 Secret에서 읽어 시작할 때 init 컨테이너가 `passwords.json`으로 만든다. 그래서 비밀번호를 바꾸려면 Secret을 고치고 파드를 재시작한다.
+- **읽기 전용 계정 `viewer`를 둔다.** `SimpleAuthManager`의 역할은 `viewer`, `user`, `op`, `admin` 순으로 높아진다. `viewer`는 조회(GET)만 허용되고, 트리거·일시정지·삭제·상태 변경 같은 쓰기 요청은 서버가 403으로 거부한다. Connections와 Variables는 조회도 거부되어 Snowflake 개인키가 노출되지 않는다. 사용자 목록은 환경변수 `AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS`에 `admin:admin,viewer:viewer`로 적는다. `viewer-password` Secret이 없으면 init 컨테이너가 `viewer` 비밀번호를 만들지 않아서, 빈 비밀번호로 로그인되는 일이 없다.
 - **여러 사용자나 DAG 단위 권한이 필요해지면 FAB 인증으로 바꾼다.** 공식 이미지에 `apache-airflow-providers-fab`가 이미 들어 있다. 이 경우 사용자 정보가 MySQL에 저장되고 UI에서 사용자·역할을 관리할 수 있다. `airflow users create`로 초기 관리자를 따로 만들어야 한다.
 - **DAG는 GitLab에서 당겨 온다 (pull).** CI가 클러스터에 DAG를 밀어 넣으려면 CI에 클러스터 쓰기 권한이 필요하다. 대신 Airflow가 `main`을 주기적으로 가져간다. Airflow 3의 `GitDagBundle`은 사이드카 컨테이너 없이 이것을 한다. 공식 이미지에 `git` 바이너리와 `apache-airflow-providers-git`이 들어 있어서 커스텀 이미지가 필요 없다.
 - **Git 읽기용 deploy token을 쓴다.** 사람 계정의 비밀번호나 개인 토큰 대신, 프로젝트 하나에만 묶이고 `read_repository` 범위만 가진 deploy token을 쓴다. 유출돼도 피해가 이 저장소 읽기로 제한된다.
@@ -95,7 +96,7 @@ kubectl -n airflow create secret generic airflow-secrets \
 `<DB 비밀번호>`, `<Fernet 키>`, `<JWT 서명 키>`, `<API 비밀 키>`, `<관리자 비밀번호>`는 `openssl rand`로 실행할 때마다 새로 만들어서 고정할 수 없다. 관리자 비밀번호 확인은 `kubectl -n airflow get secret airflow-secrets -o jsonpath='{.data.admin-password}' | base64 -d`로 한다.
 
 ### Airflow 배포
-- 설명: Airflow를 Deployment 하나로 배포한다. `airflow standalone`을 LocalExecutor로 실행하고, 비밀 값은 모두 Secret에서 환경변수로 주입한다. DAG는 `GitDagBundle` 설정(`AIRFLOW__DAG_PROCESSOR__DAG_BUNDLE_CONFIG_LIST`)으로 GitLab `main`을 60초마다 가져온다. 시작 전에 init 컨테이너가 관리자 비밀번호 파일을 만든다. 도메인을 인자로 주면 ingress와 Let's Encrypt 인증서도 만든다. Secret `airflow-git`이 없으면 DAG 읽기가 실패하므로, 처음에는 이 스크립트를 직접 실행하지 않고 deploy token 등록 스크립트를 거친다.
+- 설명: Airflow를 Deployment 하나로 배포한다. `airflow standalone`을 LocalExecutor로 실행하고, 비밀 값은 모두 Secret에서 환경변수로 주입한다. DAG는 `GitDagBundle` 설정(`AIRFLOW__DAG_PROCESSOR__DAG_BUNDLE_CONFIG_LIST`)으로 GitLab `main`을 60초마다 가져온다. 시작 전에 init 컨테이너가 관리자와 `viewer`의 비밀번호 파일을 만든다. 도메인을 인자로 주면 ingress와 Let's Encrypt 인증서도 만든다. Secret `airflow-git`이 없으면 DAG 읽기가 실패하므로, 처음에는 이 스크립트를 직접 실행하지 않고 deploy token 등록 스크립트를 거친다.
 - 스크립트: [`02-deploy-airflow.sh`](../scripts/14-airflow/02-deploy-airflow.sh)
 
 ```bash
@@ -137,6 +138,7 @@ Deployment의 핵심 설정은 다음과 같다.
 - 실행 명령: `airflow standalone`
 - 실행기: `AIRFLOW__CORE__EXECUTOR=LocalExecutor`, 병렬 작업 8개
 - 예제 DAG 끔: `AIRFLOW__CORE__LOAD_EXAMPLES=False`
+- 사용자 목록: `AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS=admin:admin,viewer:viewer`, 비밀번호 파일은 `AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE=/opt/airflow/auth/passwords.json`
 - 커넥션 화면의 Test 버튼 켬: `AIRFLOW__CORE__TEST_CONNECTION=Enabled` (기본값은 꺼짐이다. 시크릿이 아니라 설정값이라 환경 변수로 넣는다)
 - 시간대: `Asia/Seoul`
 - 자원: 요청 CPU 300m / 메모리 1Gi, 상한 메모리 2Gi
@@ -159,6 +161,23 @@ kubectl -n airflow rollout status deploy/airflow --timeout=600s
 ```
 
 `<새 비밀번호 base64>`는 입력한 비밀번호에서 만들어지므로 고정할 수 없다.
+
+### viewer 비밀번호 설정
+- 설명: 읽기 전용 사용자 `viewer`의 비밀번호를 화면에 표시하지 않고 두 번 입력받아 Secret의 `viewer-password`를 바꾸고 Airflow를 재시작한다. 사용자 자체는 배포 스크립트가 등록하므로 이 스크립트는 비밀번호만 넣는다. 12자 미만이면 경고만 한다. JSON 파일을 만들 때 깨지는 `"`와 `\`는 거부한다. 재시작 중에는 UI가 잠시 끊기고 실행 중인 작업도 함께 끊긴다.
+- 스크립트: [`03-set-viewer-password.sh`](../scripts/14-airflow/03-set-viewer-password.sh)
+
+```bash
+# Secret에 viewer-password 값을 새 비밀번호(base64)로 넣는다
+kubectl -n airflow patch secret airflow-secrets --type merge -p '{"data":{"viewer-password":"<새 비밀번호 base64>"}}'
+
+# 파드를 재시작한다 (init 컨테이너가 두 계정의 비밀번호 파일을 다시 만든다)
+kubectl -n airflow rollout restart deploy/airflow
+
+# 재시작이 끝날 때까지 기다린다
+kubectl -n airflow rollout status deploy/airflow --timeout=600s
+```
+
+`<새 비밀번호 base64>`는 입력한 비밀번호에서 만들어지는 값이라 고정할 수 없다.
 
 ### Git 번들 연결 (deploy token 등록)
 - 설명: Airflow가 GitLab의 DAG 저장소를 읽을 수 있게 한다. 먼저 GitLab 프로젝트의 Settings → Repository → Deploy tokens에서 `read_repository` 범위만 가진 토큰을 만든다. 스크립트는 토큰의 사용자명과 값을 화면에 표시하지 않고 입력받아 Secret `airflow-git`에 저장하고, 이어서 `02-deploy-airflow.sh`를 실행해 번들 설정이 들어간 Deployment를 적용한다.
@@ -567,6 +586,9 @@ Airflow 3의 작업 코드는 Airflow DB를 직접 읽지 않고 API 서버를 �
 ### SimpleAuthManager에는 UI에서 비밀번호를 바꾸는 기능이 없다
 스크립트로 Secret을 바꾸고 파드를 재시작해야 한다. 재시작 중에는 UI가 끊기고 실행 중인 작업도 끊긴다.
 
+### viewer에게도 트리거 버튼이 보인다
+UI는 역할과 상관없이 DAG 트리거 버튼을 그린다. `viewer`가 눌러도 서버가 403으로 거부해서 DAG 실행은 만들어지지 않는다.
+
 ## 검증 명령
 
 ```bash
@@ -609,6 +631,7 @@ kubectl -n gitlab exec deploy/gitlab -- gitlab-rails runner 'p=Project.find_by_f
 - 2026-10-19: 관리자 비밀번호 변경 스크립트와 FAB 인증 전환은 문서화만 했고 실제로 실행해 검증하지 않았다.
 - 2026-10-21: Snowflake 연동을 구성했다. 서비스 사용자(`TYPE = SERVICE`)와 전용 롤을 만들고 공개키를 등록한 뒤 Airflow UI에서 `snowflake_app` 커넥션을 만들었다. 파드 안에서 파이썬을 직접 실행해 확인하면 커넥션이 없다는 오류가 나서 DAG 작업으로 확인 방식을 바꿨다. 확인용 DAG를 `develop` → `main`으로 올려 실행하자 작업이 성공했고, 작업 로그에 사용자·롤·웨어하우스가 `SVC_AIRFLOW`, `AIRFLOW_APP`, `DBT_WH`로 찍혔다.
 - 2026-10-21: 개인키를 환경변수로 주입하는 방식은 `env`에 키가 노출돼서 쓰지 않기로 했다. 따로 확인하지는 않았고 설계 결정이다. AWS EKS용 시크릿 연동 방식은 조사만 했고 실제로 구성하지 않았다.
+- 2026-10-22: 읽기 전용 사용자 `viewer`를 추가했다. 사용자 목록을 `admin:admin,viewer:viewer`로 바꾸고 재시작한 뒤, `viewer` 토큰으로 DAG 목록 조회는 200, 트리거·일시정지·삭제·clear·상태 변경은 모두 403, Connections와 Variables 조회도 403인 것을 API로 확인했다. 배포 스크립트로 다시 배포해도 `viewer`가 유지되고, 빈 비밀번호로는 로그인되지 않는 것을 확인했다.
 
 ---
 
