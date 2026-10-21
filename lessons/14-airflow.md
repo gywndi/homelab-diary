@@ -28,6 +28,7 @@ k8s 위에 Apache Airflow 3를 가장 가볍게 세우고, 작업 정의(DAG)를
 | 로그인 | `SimpleAuthManager`, 계정 `admin` 하나 | 비밀번호는 Secret `airflow-secrets`의 `admin-password` |
 | DAG 소스 | GitLab 프로젝트 `airflow-dags`의 `main` 브랜치 | `GitDagBundle`이 60초마다 가져옴 |
 | Git 접속 정보 | Secret `airflow-git` (deploy token) | 읽기 전용 토큰 |
+| Snowflake 커넥션 | Airflow 커넥션 `snowflake_app` (Airflow DB에 암호화 저장) | RSA 키 인증, 서비스 사용자 `SVC_AIRFLOW` |
 
 ## 설계 결정
 
@@ -47,6 +48,11 @@ k8s 위에 Apache Airflow 3를 가장 가볍게 세우고, 작업 정의(DAG)를
 - **브랜치는 `develop` → `main` 두 개다.** 작업은 `develop`에 푸시한다. 푸시하면 CI가 자동으로 돈다. 운영은 `main`이고 `develop`에서 `main`으로 MR(Merge Request, 병합 요청)을 열어 파이프라인이 성공해야만 병합한다. `develop`은 상시 브랜치라 보호 브랜치로 두어 삭제를 막는다.
 - **기본 브랜치는 `develop`이다.** 저장소를 열면 `develop`이 보인다. 대신 CI 규칙이 기본 브랜치 이름에 의존하지 않도록 `main`을 직접 적는다. MR을 만들 때 기본 대상이 `develop`이 되므로 `main`으로 바꿔야 한다.
 - **레지스트리와 커스텀 이미지는 아직 쓰지 않는다.** GitLab의 Container Registry는 메모리 절약을 위해 꺼져 있다. provider를 많이 추가해야 할 때 켜고 이미지를 직접 만든다.
+- **Snowflake는 키 쌍 인증을 쓴다.** 비밀번호 대신 RSA 키 쌍을 쓴다. 공개키만 Snowflake 사용자에 등록하고 개인키는 Snowflake로 보내지 않는다. 사용자는 `TYPE = SERVICE`로 만든다. 이 타입은 비밀번호 로그인이 막혀 있어서 키가 유출되지 않는 한 안전하다.
+- **Snowflake 전용 롤과 사용자를 따로 둔다.** dbt 계정과 분리한 `AIRFLOW_APP` 롤과 `SVC_AIRFLOW` 사용자를 만든다. 쓰는 권한이 달라서 최소 권한을 따로 관리할 수 있고, 문제가 생겼을 때 어느 쪽인지 추적하기 쉽다. 처음에는 웨어하우스 사용 권한만 주고, 인증을 확인한 뒤 필요한 권한을 더한다.
+- **Airflow가 키를 받는 방법은 세 가지다.** 개인키 파일 경로(`private_key_file`), PEM 텍스트(`private_key_content`), PEM 파일 전체를 base64 한 줄로 만든 값(역시 `private_key_content`)이다. 줄바꿈 처리에 안전한 base64 한 줄을 쓴다.
+- **커넥션은 환경변수가 아니라 Airflow 커넥션(UI)으로 만든다.** 환경변수로 주입하면 파드에서 `env`를 볼 때 개인키가 그대로 보인다. UI에서 만든 커넥션은 Airflow DB에 Fernet 키로 암호화되어 저장되고, 화면에서는 개인키 칸이 가려진다. 파드를 재시작할 필요도 없다. 대신 Airflow DB를 새로 만들면 다시 등록해야 하고, 커넥션 정의가 Git에 남지 않는다.
+- **클라우드(AWS EKS)에서는 시크릿 매니저와 연동한다.** 홈랩에는 해당하지 않지만 같은 구조를 옮길 수 있다. Airflow 시크릿 백엔드로 Secrets Manager를 직접 읽거나, External Secrets Operator로 k8s Secret에 동기화하거나, Secrets Store CSI Driver로 파일을 마운트한다. 파드 권한은 IRSA나 Pod Identity로 준다. 비밀 자체를 없애려면 Snowflake의 워크로드 아이덴티티(`workload_identity_provider = AWS`)를 쓸 수 있는데, 계정에서 지원되는지 먼저 확인해야 한다. 홈랩에서는 이미 있는 Vault의 시크릿 백엔드로 같은 효과를 낼 수 있다.
 
 ## 대상
 
@@ -192,6 +198,117 @@ kubectl -n gitlab exec deploy/gitlab -- gitlab-rails runner '...'
 - `develop`: 푸시 Developer(30), 병합 Maintainer(40), 강제 푸시 금지로 보호 브랜치를 만든다.
 - 기본 브랜치를 `develop`으로 바꾼다.
 
+## Snowflake 연동 (RSA 키 인증)
+
+Airflow 작업이 Snowflake에 접속하도록 서비스 사용자와 커넥션을 만든다. 순서는 키 쌍 생성, Snowflake에 사용자와 공개키 등록, Airflow 커넥션 생성, DAG로 확인이다. 이 절차는 스크립트가 아니라 명령으로 수행했다. 개인키가 거치는 곳은 로컬 PC와 Airflow 커넥션뿐이다.
+
+### 키 쌍 생성 (로컬 PC)
+
+```bash
+# 키를 둘 폴더를 만들고 본인만 접근하게 한다 (저장소 밖)
+mkdir -p ~/airflow-snowflake && chmod 700 ~/airflow-snowflake && cd ~/airflow-snowflake
+
+# 개인키를 만든다 (PKCS8 형식, 암호 없음)
+openssl genrsa 2048 | openssl pkcs8 -topk8 -inform PEM -out svc_key.p8 -nocrypt
+
+# 개인키는 본인만 읽게 한다
+chmod 600 svc_key.p8
+
+# 개인키에서 공개키를 뽑는다
+openssl rsa -in svc_key.p8 -pubout -out svc_key.pub
+
+# Snowflake에 넣을 공개키 본문 한 줄을 만든다 (헤더·푸터·줄바꿈 제거)
+grep -v "PUBLIC KEY" svc_key.pub | tr -d '\n'
+```
+
+개인키 파일은 저장소에 넣지 않는다. 홈 폴더를 클라우드 동기화(iCloud Drive 등)에 올리는 설정이라면 이 폴더는 제외한다.
+
+### Snowflake 롤과 사용자 생성
+
+```sql
+-- 롤과 사용자는 USERADMIN으로 만든다
+USE ROLE USERADMIN;
+
+-- Airflow 전용 롤을 만든다
+CREATE ROLE IF NOT EXISTS AIRFLOW_APP;
+
+-- 서비스 사용자를 만든다. TYPE = SERVICE는 비밀번호 로그인이 막히고 키 인증만 된다
+CREATE USER IF NOT EXISTS SVC_AIRFLOW
+  TYPE = SERVICE
+  DEFAULT_ROLE = AIRFLOW_APP
+  DEFAULT_WAREHOUSE = DBT_WH
+  RSA_PUBLIC_KEY = '<공개키 한 줄>'
+  COMMENT = 'Airflow 애플리케이션 계정 (키 인증)';
+
+-- 사용자에게 롤을 준다
+GRANT ROLE AIRFLOW_APP TO USER SVC_AIRFLOW;
+
+-- 웨어하우스 사용 권한을 준다
+USE ROLE SECURITYADMIN;
+GRANT USAGE ON WAREHOUSE DBT_WH TO ROLE AIRFLOW_APP;
+
+-- 키가 등록됐는지 확인한다 (RSA_PUBLIC_KEY_FP에 값이 있으면 등록된 것이다)
+DESC USER SVC_AIRFLOW;
+```
+
+`<공개키 한 줄>`은 위에서 만든 공개키 본문이라 사용자마다 달라 고정할 수 없다. 사용자가 이미 있으면 `CREATE USER IF NOT EXISTS`가 건너뛰므로 `ALTER USER SVC_AIRFLOW SET RSA_PUBLIC_KEY = '<공개키 한 줄>'`로 키만 등록한다. `GRANT USAGE ON WAREHOUSE`가 권한 부족으로 실패하면 웨어하우스 소유 롤로 바꿔 실행한다. 테이블을 읽거나 쓰려면 대상 데이터베이스·스키마·테이블 권한을 필요한 만큼만 더한다. 키 교체는 `RSA_PUBLIC_KEY_2` 슬롯에 새 키를 먼저 등록하고, 클라이언트를 바꾼 뒤 기존 슬롯을 비우면 끊김 없이 된다.
+
+### Airflow 커넥션 만들기 (UI)
+
+개인키를 PEM 파일 전체 기준 base64 한 줄로 바꾸고, UI의 Private key (Text) 칸에 붙여넣는다.
+
+```bash
+# 개인키 파일 전체(헤더 포함)를 base64 한 줄로 만들어 클립보드에 넣는다
+base64 < ~/airflow-snowflake/svc_key.p8 | tr -d '\n' | pbcopy
+```
+
+Airflow UI의 Admin → Connections → Add Connection에서 다음과 같이 채운다.
+
+| 필드 | 값 |
+|---|---|
+| Connection ID | `snowflake_app` |
+| Connection Type | `Snowflake` |
+| Login | `SVC_AIRFLOW` |
+| Password | 비움 (개인키에 암호를 걸지 않았다) |
+| Account | `<조직>-<계정>` (Snowflake 계정 식별자) |
+| Warehouse | `DBT_WH` |
+| Role | `AIRFLOW_APP` |
+| Private key (Text) | 클립보드의 base64 한 줄 |
+| Private key (Path) | 비움 (Text와 같이 주면 오류) |
+
+폼에 칸이 보이지 않으면 Extra 입력란에 JSON으로 넣는다.
+
+```json
+{"account":"<조직>-<계정>","warehouse":"DBT_WH","role":"AIRFLOW_APP","private_key_content":"<base64 한 줄>"}
+```
+
+`<조직>-<계정>`은 환경마다 다른 Snowflake 계정 식별자이고, `<base64 한 줄>`은 키마다 달라서 고정할 수 없다.
+
+### 키 입력 규칙
+
+프로바이더(`apache-airflow-providers-snowflake` 6.17.0)의 키 읽기 순서는 다음과 같다.
+
+1. `private_key_content`를 PEM 텍스트로 읽는다. `-----BEGIN PRIVATE KEY-----`부터 `-----END PRIVATE KEY-----`까지 있어야 한다.
+2. 실패하면 값을 base64로 디코딩한 뒤 다시 PEM으로 읽는다.
+3. `private_key_file`과 `private_key_content`는 같이 쓸 수 없다. 둘을 같이 주면 오류가 난다. 개인키에 암호를 걸었다면 커넥션의 Password에 그 암호를 넣는다.
+
+따라서 base64로 넣을 때는 PEM 파일 전체를 인코딩해야 한다. 헤더와 푸터를 뺀 본문만 인코딩하거나 본문만 그대로 넣으면 디코딩 결과가 PEM이 아니어서 읽기에 실패한다.
+
+### 확인용 DAG
+
+커넥션은 DAG 작업으로 확인한다. `dags/examples/snowflake_check.py`는 `snowflake_app`으로 현재 사용자·롤·웨어하우스를 조회한다.
+
+```python
+SQLExecuteQueryOperator(
+    task_id="whoami",
+    conn_id="snowflake_app",
+    sql="select current_user(), current_role(), current_warehouse()",
+    show_return_value_in_logs=True,
+)
+```
+
+DAG를 `develop` → `main`으로 올린 뒤 Airflow UI에서 실행하고 작업 로그를 본다. 성공하면 로그에 `[[('SVC_AIRFLOW', 'AIRFLOW_APP', 'DBT_WH')]]`가 찍힌다.
+
 ## 외부 노출 (도메인·내부 DNS·인증서)
 
 Airflow의 도메인 작업은 스크립트가 아니라 기존 스크립트를 재사용한다.
@@ -222,6 +339,7 @@ airflow-dags/
 ├── dags/                       # Airflow가 읽는 DAG만 둔다 (도메인별 폴더)
 │   └── examples/
 │       ├── hello.py            # 예제: 매일 한 번 echo
+│       ├── snowflake_check.py  # Snowflake 커넥션 확인용 예제
 │       └── sync_check.py       # 동기화 확인용 예제
 ├── include/                    # DAG가 import하는 공용 함수, SQL
 ├── tests/
@@ -314,6 +432,12 @@ docker compose up
 ### 토큰 Secret 없이 배포 스크립트를 먼저 실행하면 dag-processor가 실패한다
 Deployment가 `airflow-git` Secret을 참조하므로 deploy token 등록 스크립트를 먼저 실행해야 한다.
 
+### 단독 실행한 파이썬에서는 UI로 만든 커넥션이 보이지 않는다
+Airflow 3의 작업 코드는 Airflow DB를 직접 읽지 않고 API 서버를 거쳐 커넥션을 받는다. 그래서 파드 안에서 `python -c`로 훅을 호출하면 커넥션이 있어도 `The conn_id isn't defined`가 난다. 커넥션 확인은 DAG 작업으로 한다. 커넥션 존재 여부는 `airflow connections list`로 볼 수 있다.
+
+### 개인키 본문만 넣으면 키를 읽지 못한다
+헤더·푸터가 없는 본문(`MIIEvg...`)은 PEM도 아니고, base64로 디코딩해도 DER 바이너리라 PEM으로 읽을 수 없다. PEM 텍스트 전체이거나, PEM 파일 전체를 base64로 인코딩한 값이어야 한다.
+
 ### SimpleAuthManager에는 UI에서 비밀번호를 바꾸는 기능이 없다
 스크립트로 Secret을 바꾸고 파드를 재시작해야 한다. 재시작 중에는 UI가 끊기고 실행 중인 작업도 끊긴다.
 
@@ -339,6 +463,9 @@ kubectl -n airflow logs deploy/airflow -c airflow --tail=200 | grep "Refreshing 
 # HTTPS 응답과 인증서 발급자 확인
 curl -s -o /dev/null -w "%{http_code} verify=%{ssl_verify_result}\n" https://airflow.example.com/
 
+# Snowflake 커넥션이 등록됐는지 확인한다
+kubectl -n airflow exec deploy/airflow -c airflow -- airflow connections list
+
 # DAG 저장소의 보호 브랜치와 기본 브랜치 확인
 kubectl -n gitlab exec deploy/gitlab -- gitlab-rails runner 'p=Project.find_by_full_path("<소유자>/airflow-dags"); puts p.default_branch; p.protected_branches.each { |b| puts "#{b.name} push=#{b.push_access_levels.map(&:access_level)} merge=#{b.merge_access_levels.map(&:access_level)}" }'
 ```
@@ -354,6 +481,8 @@ kubectl -n gitlab exec deploy/gitlab -- gitlab-rails runner 'p=Project.find_by_f
 - 2026-10-19: `main` 직접 푸시를 막고 파이프라인 성공 시에만 병합하게 설정했다. `main`에 직접 푸시를 시도하자 `pre-receive hook declined`로 거부되는 것을 확인했다.
 - 2026-10-19: `develop` → `main` 전략을 적용했다. `develop` 푸시에서 파이프라인이 자동으로 돌고, `develop` → `main` MR 파이프라인이 성공해 병합됐다. 이어서 기본 브랜치를 `develop`으로 바꾸고 CI 규칙을 `main` 고정으로 고쳐 병합했다. 브랜치 규칙 스크립트를 다시 실행해 같은 상태가 유지되는 것을 확인했다.
 - 2026-10-19: 관리자 비밀번호 변경 스크립트와 FAB 인증 전환은 문서화만 했고 실제로 실행해 검증하지 않았다.
+- 2026-10-21: Snowflake 연동을 구성했다. 서비스 사용자(`TYPE = SERVICE`)와 전용 롤을 만들고 공개키를 등록한 뒤 Airflow UI에서 `snowflake_app` 커넥션을 만들었다. 파드 안에서 파이썬을 직접 실행해 확인하면 커넥션이 없다는 오류가 나서 DAG 작업으로 확인 방식을 바꿨다. 확인용 DAG를 `develop` → `main`으로 올려 실행하자 작업이 성공했고, 작업 로그에 사용자·롤·웨어하우스가 `SVC_AIRFLOW`, `AIRFLOW_APP`, `DBT_WH`로 찍혔다.
+- 2026-10-21: 개인키를 환경변수로 주입하는 방식은 `env`에 키가 노출돼서 쓰지 않기로 했다. 따로 확인하지는 않았고 설계 결정이다. AWS EKS용 시크릿 연동 방식은 조사만 했고 실제로 구성하지 않았다.
 
 ---
 
