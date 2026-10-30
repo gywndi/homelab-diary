@@ -49,6 +49,9 @@
 14. Airflow (워크플로 스케줄러 + DAG 저장소)
     - k8s 위 단일 파드(standalone, LocalExecutor) + 기존 MySQL 메타데이터 DB, 공인 도메인 HTTPS, GitLab `develop` → `main` 브랜치 규칙과 `GitDagBundle`로 DAG 자동 동기화
     - 문서 [바로가기](lessons/14-airflow.md) · 스크립트 [바로가기](scripts/14-airflow/)
+15. Superset (BI 대시보드) + Snowflake 연결
+    - k8s 위 단일 파드(내장 SQLite + Ceph PVC), 공인 도메인 HTTPS, Snowflake 드라이버(PVC 설치)와 키 쌍 인증 연결
+    - 문서 [바로가기](lessons/15-superset.md) · 스크립트 [바로가기](scripts/15-superset/)
 
 ## 운영 명령 모음
 
